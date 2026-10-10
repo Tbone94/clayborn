@@ -1,0 +1,6 @@
+node_modules/
+dist/
+captures/
+*.mp4
+.DS_Store
+.claude/
