@@ -317,6 +317,16 @@ input[type=range]::-moz-range-thumb { width: 12px; height: 22px; border-radius: 
 .prompt p { font: 500 14px/1.5 var(--ui); margin: 10px 16px 14px; color: var(--ink-2); }
 .prompt .row { display: flex; gap: 14px; padding: 0 18px; }
 @keyframes slide-up { from { transform: translate(-50%, 30px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+/* nearby monster: a slim pill */
+.prompt.mini { width: auto; display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 14px; bottom: 54px; border-width: 2px; box-shadow: 4px 4px 0 var(--ink);
+  background: var(--ink); white-space: nowrap; animation: pill-in .18s ease-out; }
+.prompt.mini b { font: 400 16px var(--display); color: var(--yellow); margin-right: 4px; max-width: 34vw; overflow: hidden; text-overflow: ellipsis; }
+.prompt.mini button { font: 900 12px var(--ui); text-transform: uppercase; letter-spacing: .04em; padding: 6px 10px; border: 2px solid var(--ink); background: var(--white); color: var(--ink); cursor: pointer; }
+.prompt.mini button:first-of-type { background: var(--red); color: var(--white); }
+.prompt.mini button:hover { background: var(--yellow); color: var(--ink); }
+.prompt.mini kbd { margin: 0 0 0 4px; padding: 0 4px; font-size: 10px; }
+@keyframes pill-in { from { transform: translate(-50%, 10px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+@media (pointer: coarse) { .prompt.mini kbd { display: none; } .prompt.mini { bottom: calc(186px + env(safe-area-inset-bottom)); } .prompt.mini button { padding: 8px 11px; } }
 .event-hud { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 14px; align-items: center; }
 .pill { background: var(--ink); color: var(--yellow); font: 400 22px var(--dot); padding: 4px 16px; transform: skewX(-10deg); box-shadow: 4px 4px 0 var(--red); }
 .banner { position: absolute; top: 34%; left: 0; right: 0; text-align: center; pointer-events: none;

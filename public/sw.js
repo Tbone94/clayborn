@@ -1,6 +1,6 @@
 // Clayborn service worker: plays offline once you've loaded it.
 // Pages are network-first (so updates arrive); everything else is cache-first and filled as it's fetched.
-const CACHE = 'clayborn-v1';
+const CACHE = 'clayborn-v2';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {

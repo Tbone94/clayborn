@@ -470,8 +470,13 @@ export class Island {
     this.fx.update(dt);
 
     // proximity prompts
-    let near = null, best = 2.8;
-    for (const r of this.garden.roamers) { const d = Math.hypot(P.x - r.b.x, P.z - r.b.z); if (d < best) { best = d; near = { kind: 'roamer', r }; } }
+    // monsters: only when you're right next to one, and keep it a moment so it doesn't flicker
+    let near = null, best = 1.9;
+    for (const r of this.garden.roamers) {
+      const d = Math.hypot(P.x - r.b.x, P.z - r.b.z);
+      if (d < best || (r === this.nearRoamer && d < 2.6 && d < best + 0.7)) { best = d; near = { kind: 'roamer', r }; }
+    }
+    this.nearRoamer = near?.r || null;
     ZONES.forEach((zn, i) => { if (Math.hypot(P.x - zn.x, P.z - zn.z) < 5) near = { kind: 'zone', i }; });
     if (Math.hypot(P.x - this.easel.position.x, P.z - this.easel.position.z) < 3.5) near = { kind: 'easel' };
     this.showPrompt(near);
@@ -481,7 +486,7 @@ export class Island {
 
   showPrompt(near) {
     const el = $('prompt');
-    const key = near ? near.kind + (near.i ?? '') + (near.r ? near.r.c.design.name + near.r.state : '') : '';
+    const key = near ? near.kind + (near.i ?? '') + (near.r ? near.r.c.design.name + near.r.pet : '') : '';
     if (key === this.promptKey) return;
     this.promptKey = key;
     if (!near) { el.classList.add('hidden'); return; }
@@ -490,14 +495,14 @@ export class Island {
       el.innerHTML = `<h2><span class="jp">型取り</span>Mold Lab</h2><p>Redraw ${nm} (new shape = new stats), or make a brand-new monster. Everyone you make keeps living on the island.</p>
         <div class="row"><button class="btn primary" id="p-go">Edit ${nm} <kbd>E</kbd></button><button class="btn" id="p-new">New monster</button></div>`;
     } else if (near.kind === 'roamer') {
-      const r = near.r, nm = escapeHtml(r.name);
-      const mood = { nap: 'is napping. Zzz…', play: 'is bouncing around.', follow: 'is following you around.', chat: 'is gossiping.', greet: 'says hi!' }[r.state] || 'is hanging out.';
-      el.innerHTML = `<h2><span class="jp">${r.pet ? '仲間' : '島民'}</span>${nm}${r.pet ? '<em>YOURS</em>' : ''}</h2><p>${nm} ${mood}${r.pet ? ' Swap to play as this monster.' : ' A local of the island.'}</p>
-        <div class="row"><button class="btn primary" id="p-go">Pet <kbd>E</kbd></button>${r.pet ? '<button class="btn" id="p-swap">Play as them <kbd>F</kbd></button>' : ''}</div>`;
+      // a slim pill, not a card: you walk past these all the time
+      const r = near.r;
+      el.innerHTML = `<b>${escapeHtml(r.name)}</b><button id="p-go">♥ Pet <kbd>E</kbd></button>${r.pet ? '<button id="p-swap">⇄ Play as <kbd>F</kbd></button>' : ''}`;
     } else {
       const zn = ZONES[near.i], done = this.app.save.orbs.includes(near.i);
       el.innerHTML = `<h2><span class="jp">${zn.jp}</span>${zn.name}${done ? '<em>CLEARED</em>' : ''}</h2><p>${zn.desc}</p><div class="row"><button class="btn primary" id="p-go">${done ? 'Play again' : 'Play'} <kbd>E</kbd></button></div>`;
     }
+    el.classList.toggle('mini', near.kind === 'roamer');
     el.classList.remove('hidden');
     $('p-go').onclick = () => this.activate(near);
     if ($('p-new')) $('p-new').onclick = () => { this.promptKey = null; el.classList.add('hidden'); this.app.newMonster(); };
