@@ -6,6 +6,7 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { QUALITY as Q } from './quality.js';
 
 const DioramaShader = {
   uniforms: {
@@ -30,11 +31,11 @@ const DioramaShader = {
       vec4 col = texture2D(tDiffuse, vUv);
       if (r > 0.001) {
         vec4 acc = col; float wsum = 1.0;
-        // golden-angle disc blur
-        for (int i = 1; i < 24; i++) {
+        // golden-angle disc blur (TAPS comes from the quality tier)
+        for (int i = 1; i < TAPS; i++) {
           float fi = float(i);
           float a = fi * 2.39996;
-          float rr = sqrt(fi / 24.0) * r * 10.0;
+          float rr = sqrt(fi / float(TAPS)) * r * 10.0;
           vec2 off = vec2(cos(a), sin(a)) * rr / uRes * vec2(uRes.y/720.0);
           acc += texture2D(tDiffuse, vUv + off); wsum += 1.0;
         }
@@ -46,12 +47,17 @@ const DioramaShader = {
       col.rgb *= uWarm;
       col.rgb += (rand(vUv * uRes) - 0.5) * uGrain;
       gl_FragColor = col;
+      // no-ops while this pass renders into a target (OutputPass follows); when it is the
+      // last pass (low/medium tier, OutputPass dropped) three injects tone mapping + sRGB here
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
     }`,
 };
 
 export function createRenderer(canvas) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
-  let dpr = Math.min(window.devicePixelRatio, 1.75);
+  const maxDpr = () => Math.min(window.devicePixelRatio, Q.maxDpr);
+  let dpr = Math.min(window.devicePixelRatio, Q.dpr);
   renderer.setPixelRatio(dpr);
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -65,27 +71,37 @@ export function createRenderer(canvas) {
 
   const size = new THREE.Vector2();
   renderer.getDrawingBufferSize(size);
-  const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 });
+  const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: Q.msaa });
   const composer = new EffectComposer(renderer, rt);
   const renderPass = new RenderPass(new THREE.Scene(), new THREE.PerspectiveCamera());
-  const bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.3, 0.5, 1.15);
-  const diorama = new ShaderPass(DioramaShader);
+  // phones skip bloom entirely (its mip chain is ~10 extra full-screen-ish passes)
+  const bloom = Q.bloom ? new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.3, 0.5, 1.15) : { strength: 0, enabled: false };
+  const diorama = new ShaderPass({ ...DioramaShader, defines: { TAPS: Q.blurTaps } });
   composer.addPass(renderPass);
-  composer.addPass(bloom);
+  if (Q.bloom) composer.addPass(bloom);
   composer.addPass(diorama);
-  composer.addPass(new OutputPass());
+  // without bloom the diorama pass can tone-map straight to the screen: one less full-screen pass
+  if (!Q.tonemapInPost) composer.addPass(new OutputPass());
 
   const api = {
-    renderer, composer, envMap, diorama, bloom,
-    // adaptive resolution: keep it smooth on laptops & phones
-    perf: { acc: 0, n: 0 },
+    renderer, composer, envMap, diorama, bloom, quality: Q,
+    // adaptive resolution: keep it smooth on laptops & phones.
+    // Phones check more often, drop harder and need two good windows in a row before going back up
+    // (so a 60Hz phone doesn't ping-pong between two resolutions).
+    perf: { acc: 0, n: 0, good: 0, skip: 1 },
     adapt(dt) {
       const p = this.perf; p.acc += dt; p.n++;
-      if (p.acc < 2) return;
+      if (p.acc < Q.adaptEvery) return;
       const avg = p.acc / p.n; p.acc = 0; p.n = 0;
-      const maxDpr = Math.min(window.devicePixelRatio, 1.75);
-      if (avg > 1 / 45 && dpr > 0.75) { dpr = Math.max(0.75, dpr - 0.25); renderer.setPixelRatio(dpr); this.resize(); }
-      else if (avg < 1 / 58 && dpr < maxDpr) { dpr = Math.min(maxDpr, dpr + 0.25); renderer.setPixelRatio(dpr); this.resize(); }
+      if (p.skip > 0) { p.skip--; return; } // first window is full of shader compiles
+      const hi = maxDpr(), lo = Math.min(Q.minDpr, hi);
+      if (avg > 1 / Q.slowFps && dpr > lo) {
+        const step = Q.tier === 'high' ? 0.25 : (avg > 1 / 28 ? 0.25 : 0.15);
+        dpr = Math.max(lo, dpr - step); p.good = 0; renderer.setPixelRatio(dpr); this.resize();
+      } else if (avg < 1 / Q.fastFps && dpr < hi) {
+        if (Q.tier !== 'high' && ++p.good < 2) return;
+        p.good = 0; dpr = Math.min(hi, dpr + (Q.tier === 'high' ? 0.25 : 0.125)); renderer.setPixelRatio(dpr); this.resize();
+      } else p.good = 0;
     },
     render(scene, camera, t) {
       renderPass.scene = scene; renderPass.camera = camera;

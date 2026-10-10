@@ -10,7 +10,7 @@ import { randomName } from './creature/generator.js';
 import { initAudio, playMusic, sfx, setMuted, isMuted, babble, setAmbience } from './fx/audio.js';
 import { Input } from './ui/input.js';
 import { loadAssets } from './world/assets.js';
-import { WORLD_TIME } from './world/nature.js';
+import { WORLD_TIME, cullNature } from './world/nature.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -84,19 +84,28 @@ class App {
     $('btn-quiz').onclick = () => { sfx.click(); this.startQuiz(); };
     $('btn-code').onclick = () => { sfx.click(); this.codeModal(); };
     $('btn-edit').onclick = () => { sfx.click(); this.editMonster(); };
+    $('btn-credits').onclick = () => { sfx.click(); this.creditsModal(); };
+    this.bindInstall();
     $('btn-mute').onclick = () => { setMuted(!isMuted()); $('btn-mute').textContent = isMuted() ? 'SND OFF' : 'SND ON'; };
 
-    // creator turntable: drag spins, tap pokes
+    // creator turntable: drag spins, tap pokes (on the add-ons step, taps stick pieces on)
     const gl = $('gl');
     let down = null;
-    gl.addEventListener('pointerdown', (e) => { if (this.mode !== 'creator') return; down = { x: e.clientX, y: e.clientY, moved: 0 }; this.studio.dragging = true; });
+    gl.addEventListener('pointerdown', (e) => {
+      if (this.mode !== 'creator') return;
+      const piece = this.creator.canvasDown(e);
+      down = { x: e.clientX, y: e.clientY, moved: 0, piece };
+      if (!piece) this.studio.dragging = true;
+    });
     window.addEventListener('pointermove', (e) => {
       if (!down || this.mode !== 'creator') return;
+      if (down.piece) { this.creator.canvasMove(e); return; }
       const dx = e.clientX - down.x; down.moved += Math.abs(dx); down.x = e.clientX; this.studio.drag(dx);
     });
     window.addEventListener('pointerup', (e) => {
       if (!down) return;
-      if (this.mode === 'creator' && down.moved < 6) this.studio.poke(e.clientX, e.clientY);
+      if (down.piece) this.creator.canvasUp(e);
+      else if (this.mode === 'creator' && down.moved < 6 && this.creator.phase !== 'addons') this.studio.poke(e.clientX, e.clientY);
       down = null; this.studio.dragging = false;
     });
   }
@@ -271,6 +280,46 @@ class App {
     $('m-x').onclick = () => this.closeModal();
   }
 
+  // installable app: Android/desktop Chrome offer a prompt; iPhone needs Share → Add to Home Screen
+  bindInstall() {
+    const btn = $('btn-install');
+    const standalone = matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches || navigator.standalone;
+    if (standalone) return;
+    let deferred = null;
+    window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferred = e; btn.classList.remove('hidden'); });
+    window.addEventListener('appinstalled', () => { btn.classList.add('hidden'); this.toast('Installed! Find Clayborn on your home screen.'); });
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (ios) btn.classList.remove('hidden');
+    btn.onclick = async () => {
+      sfx.click();
+      if (deferred) { deferred.prompt(); await deferred.userChoice.catch(() => null); deferred = null; btn.classList.add('hidden'); return; }
+      this.modal(`<h2><span class="jp">導入</span>Install Clayborn</h2>
+        <p>On iPhone or iPad: tap the <b>Share</b> button in Safari, then <b>Add to Home Screen</b>. It opens full screen and keeps working offline once you've played it.</p>
+        <div class="row"><button class="btn primary" id="m-x">Got it</button></div>`);
+      $('m-x').onclick = () => this.closeModal();
+    };
+  }
+
+  async creditsModal() {
+    let models = [];
+    try { models = await (await fetch('./assets/addons/CREDITS.json')).json(); } catch { /* offline and not cached */ }
+    const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const link = (u) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\//, ''))}</a>`;
+    const rows = models.map((m) => `<p><b>${esc(m.title)}</b> by ${esc(m.author)} · ${esc(m.license)} · ${link(m.source)}</p>`).join('');
+    this.modal(`<h2><span class="jp">謝辞</span>Credits</h2>
+      <div class="credits">
+        <h4>Add-on models</h4>${rows}
+        <p>CC-BY models are used under <a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noopener">CC BY 3.0</a>, via Poly Pizza. CC0 models are from Quaternius, iPoly3D and Kenney.</p>
+        <h4>World</h4>
+        <p>Sky, textures and fern from ${link('https://polyhaven.com')} (CC0). Trees, grass, flowers and rocks from ez-tree by Daniel Greenheck (MIT).</p>
+        <h4>Tech + type</h4>
+        <p>three.js (MIT). Fonts: Dela Gothic One, DotGothic16, Zen Kaku Gothic New (SIL OFL).</p>
+        <p>Inspired by <i>Amazing Island</i> (Sega, 2004). No assets from it are used.</p>
+      </div>
+      <div class="row"><button class="btn primary" id="m-x">Close</button></div>`);
+    $('m-x').onclick = () => this.closeModal();
+  }
+
   modal(html) { $('modal-card').innerHTML = html; $('modal').classList.remove('hidden'); }
   closeModal() { $('modal').classList.add('hidden'); }
   toast(msg, ms = 2200) {
@@ -281,8 +330,8 @@ class App {
 
   resize() {
     this.gfx.resize();
-    const narrow = window.innerWidth <= 900;
-    this.studio.layout(narrow ? 0 : 450 + 16, narrow ? 0 : 310 + 16);
+    if (this.mode === 'creator') this.creator.layoutRegion();
+    else { const narrow = window.innerWidth <= 900; this.studio.layout(narrow ? 0 : 450 + 16, narrow ? 0 : 310 + 16); }
     this.island.resize();
   }
 
@@ -298,6 +347,7 @@ class App {
       this.island.update(dt, this.t); scene = this.island.scene; camera = this.island.camera;
       if (this.island.activeEvent) { scene = this.island.activeEvent.scene; camera = this.island.activeEvent.camera; }
     }
+    cullNature(scene, camera);
     this.gfx.render(scene, camera, this.t);
     this.gfx.adapt(dt);
     this.input.endFrame();
@@ -316,5 +366,7 @@ function safeDecode(c) { try { return decodeDesign(c); } catch { return null; } 
   wipeText.textContent = '粘土';
   window.app = new App(tmp);
   if (import.meta.env.DEV) (await import('./dev/tools.js')).installDevTools(window.app);
+  // offline + installable (production builds only, so the dev server never serves stale files)
+  if (import.meta.env.PROD && 'serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
 })();
 export { escapeHtml, THREE };

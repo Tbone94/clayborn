@@ -4,6 +4,7 @@ import { heightTexture, Particles, scatter } from './common.js';
 import { GLOOM } from '../fx/clay.js';
 import { setupWorld, terrainMaterial, terrainMesh, makeWater, plantTrees, placeRocks, plantGrass, plantFlowers, plantFerns, grassHeight, modelSize, updateTrees, PUSH, pbr } from '../world/nature.js';
 import { A } from '../world/assets.js';
+import { QUALITY as Q } from '../fx/quality.js';
 import { fbm2, smoothstep, lerp } from '../game/noise.js';
 import { Body } from '../game/body.js';
 import { Garden } from '../game/garden.js';
@@ -24,6 +25,7 @@ export const ZONES = [
 ];
 for (const z of ZONES) { z.x = Math.cos(z.ang) * z.dist; z.z = Math.sin(z.ang) * z.dist; }
 const SPAWN = { x: 0, z: 2 };
+const _target = new THREE.Vector3(), _origin = new THREE.Vector3();
 
 // dirt trails: a ring round the meadow + a path out to every totem
 function segDist(px, pz, ax, az, bx, bz) {
@@ -183,7 +185,10 @@ export class Island {
 
   buildZones() {
     // the Gloom: iridescent oil-slick ooze
-    const gooMat = new THREE.MeshPhysicalMaterial({ color: '#120b1c', roughness: 0.08, metalness: 0.2, clearcoat: 1, clearcoatRoughness: 0.03, iridescence: 1, iridescenceIOR: 1.35, iridescenceThicknessRange: [180, 680], envMapIntensity: 1.6 });
+    // phones: plain glossy standard material (no clearcoat/iridescence lobes) on low-poly blobs
+    const gooMat = Q.gooPhysical
+      ? new THREE.MeshPhysicalMaterial({ color: '#120b1c', roughness: 0.08, metalness: 0.2, clearcoat: 1, clearcoatRoughness: 0.03, iridescence: 1, iridescenceIOR: 1.35, iridescenceThicknessRange: [180, 680], envMapIntensity: 1.6 })
+      : new THREE.MeshStandardMaterial({ color: '#1a1028', roughness: 0.1, metalness: 0.35, envMapIntensity: 1.9 });
     const gooU = { uTime: { value: 0 } };
     gooMat.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, gooU);
@@ -194,7 +199,7 @@ export class Island {
           transformed.y *= 1.0 + 0.1*sin(uTime*1.1 + ph);`);
     };
     this.gooU = gooU;
-    const sphere = new THREE.SphereGeometry(1, 40, 24);
+    const sphere = new THREE.SphereGeometry(1, Q.gooSeg[0], Q.gooSeg[1]);
     this.zoneState = [];
     const portalU = { uTime: { value: 0 } };
     this.portalU = portalU;
@@ -210,7 +215,7 @@ export class Island {
         if (h < 0.2) continue;
         blobs.push({ x, z, y: h - 0.25, s: 0.4 + r() * 1.3, sy: 0.45 + r() * 0.3, d });
       }
-      const im = scatter(this.scene, sphere, gooMat, blobs);
+      const im = scatter(this.scene, sphere, gooMat, blobs, { shadow: Q.propShadows });
       const g = new THREE.Group();
       const H = islandH(zn.x, zn.z);
       g.position.set(zn.x, H, zn.z);
@@ -425,7 +430,7 @@ export class Island {
       const a = t * 0.05;
       this.camera.position.set(Math.cos(a) * 62, 30, Math.sin(a) * 62);
       this.camera.lookAt(0, 0, 0);
-      this.lights.follow(new THREE.Vector3(0, 0, 0));
+      this.lights.follow(_origin);
       this.fx.update(dt);
       return;
     }
@@ -451,8 +456,8 @@ export class Island {
     }
 
     // camera
-    const target = new THREE.Vector3(P.x, Math.max(P.y, 0) + 1.2, P.z);
-    this.camTarget.lerp(target, Math.min(1, dt * 6));
+    _target.set(P.x, Math.max(P.y, 0) + 1.2, P.z);
+    this.camTarget.lerp(_target, Math.min(1, dt * 6));
     const cd = this.camDist * (this.camera.aspect < 1 ? 1.5 : 1);
     this.camera.position.set(
       this.camTarget.x + Math.cos(this.camYaw) * Math.cos(this.camPitch) * cd,

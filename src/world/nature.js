@@ -4,14 +4,21 @@ import * as THREE from 'three';
 import { Tree } from '@dgreenheck/ez-tree';
 import { A } from './assets.js';
 import { NOISE_GLSL, GLOOM } from '../fx/clay.js';
+import { QUALITY as Q } from '../fx/quality.js';
 
 export const WORLD_TIME = { value: 0 };
 export const PUSH = { value: new THREE.Vector4(0, 0, 0, 0) }; // player x, z, radius, strength
 
 const GLOOM_GLSL = /* glsl */`
 uniform vec4 uZones[4];
-float gloomAt(vec3 w){ float g = 0.0; for(int i=0;i<4;i++){ vec4 z = uZones[i]; if(z.z <= 0.0) continue;
-  float d = length(w.xz - z.xy); g = max(g, z.w * (1.0 - smoothstep(z.z*0.55, z.z, d + (vnoise(w*0.35)-0.5)*3.0))); } return g; }
+float gloomAt(vec3 w){
+  // the noise wobble is at most ±2.7 m, so far from every zone the answer is exactly 0: skip the noise
+  bool near = false;
+  for(int i=0;i<4;i++){ vec4 z = uZones[i]; if(z.z > 0.0 && z.w > 0.0 && length(w.xz - z.xy) < z.z + 3.0) near = true; }
+  if(!near) return 0.0;
+  float o = (vnoise(w*0.35)-0.5)*3.0, g = 0.0;
+  for(int i=0;i<4;i++){ vec4 z = uZones[i]; if(z.z <= 0.0) continue;
+    float d = length(w.xz - z.xy); g = max(g, z.w * (1.0 - smoothstep(z.z*0.55, z.z, d + o))); } return g; }
 `;
 
 // ---------------- sky, sun, fog ----------------
@@ -22,7 +29,8 @@ export function setupWorld(scene, { fog = [70, 260], sunIntensity = 3.2, shadowS
   scene.fog = new THREE.Fog(A.horizon.clone(), fog[0], fog[1]);
   const hemi = new THREE.HemisphereLight('#dfefff', '#5a6a3a', 0.55); scene.add(hemi);
   const sun = new THREE.DirectionalLight('#fff1dc', sunIntensity);
-  sun.castShadow = true; sun.shadow.mapSize.set(4096, 4096);
+  const SM = Q.shadowMap;
+  sun.castShadow = true; sun.shadow.mapSize.set(SM, SM);
   Object.assign(sun.shadow.camera, { left: -shadowSize, right: shadowSize, top: shadowSize, bottom: -shadowSize, near: 1, far: 200 });
   sun.shadow.bias = -0.0003; sun.shadow.normalBias = 0.035; sun.shadow.radius = 2.5;
   scene.add(sun); scene.add(sun.target);
@@ -31,7 +39,7 @@ export function setupWorld(scene, { fog = [70, 260], sunIntensity = 3.2, shadowS
     hemi, sun,
     follow(p) {
       // snap to shadow texels to stop shimmering
-      const s = (shadowSize * 2) / 4096;
+      const s = (shadowSize * 2) / SM;
       const x = Math.round(p.x / s) * s, z = Math.round(p.z / s) * s;
       sun.position.set(x + off.x, p.y + off.y, z + off.z); sun.target.position.set(x, p.y, z);
     },
@@ -52,6 +60,7 @@ export function terrainMaterial({ gloom = false, path = 'rocky_trail' } = {}) {
   };
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0 });
   mat.defines = { ...(mat.defines || {}), ...(gloom ? { USE_GLOOM: '' } : {}) };
+  const cheap = !Q.terrainNormals || !t[path].normal;
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, uniforms);
     sh.vertexShader = sh.vertexShader
@@ -70,7 +79,23 @@ export function terrainMaterial({ gloom = false, path = 'rocky_trail' } = {}) {
           return normalize(tx.zyx*w.x + ty.xzy*w.y + tz.xyz*w.z);
         }
         vec3 planN(sampler2D t, vec2 uv, vec3 n, float s){ vec3 tn = texture2D(t, uv).xyz*2.0-1.0; return normalize(vec3(tn.x*s + n.x, n.y, tn.y*s + n.z)); }`)
-      .replace('#include <map_fragment>', `
+      .replace('#include <map_fragment>', cheap ? `
+        // phone version: 7 texture taps instead of 15, one noise, no normal maps
+        vec4 sp = vSplat / max(0.0001, dot(vSplat, vec4(1.0)));
+        vec3 wn = normalize(vWN);
+        float macro = vnoise(vWP*0.035);
+        vec2 uvA = vWP.xz*0.16;
+        vec3 lawn = texture2D(tLawn, uvA*1.3).rgb;
+        lawn = mix(lawn, texture2D(tLawn2, uvA).rgb * vec3(0.8, 0.95, 0.65), smoothstep(0.45, 0.75, macro) * 0.55);
+        lawn *= mix(vec3(0.78, 0.92, 0.62), vec3(1.0, 1.05, 0.8), smoothstep(0.2, 0.8, macro));
+        vec3 dirt = texture2D(tDirt, vWP.xz*0.2).rgb;
+        vec3 sand = texture2D(tSand, vWP.xz*0.12).rgb;
+        vec3 tw = pow(abs(wn), vec3(5.0)); tw /= (tw.x+tw.y+tw.z);
+        vec3 rock = tri(tRock, vWP*0.11, tw) * vec3(0.95, 0.9, 0.86);
+        vec3 col = lawn*sp.x + dirt*sp.y + sand*sp.z + rock*sp.w;
+        diffuseColor.rgb *= col;
+        ${gloom ? `float gl = gloomAt(vWP); float lum = dot(diffuseColor.rgb, vec3(0.3,0.59,0.11));
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(lum)*vec3(0.38,0.3,0.5)*0.75, gl);` : ''}` : `
         vec4 sp = vSplat / max(0.0001, dot(vSplat, vec4(1.0)));
         vec3 wn = normalize(vWN);
         float macro = vnoise(vWP*0.035);           // breaks up tiling at a distance
@@ -88,7 +113,7 @@ export function terrainMaterial({ gloom = false, path = 'rocky_trail' } = {}) {
         diffuseColor.rgb *= col;
         ${gloom ? `float gl = gloomAt(vWP); float lum = dot(diffuseColor.rgb, vec3(0.3,0.59,0.11));
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(lum)*vec3(0.38,0.3,0.5)*0.75, gl);` : ''}`)
-      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+      .replace('#include <normal_fragment_maps>', cheap ? '#include <normal_fragment_maps>' : `#include <normal_fragment_maps>
         {
           vec3 nLawn = planN(tLawnN, uvA, wn, 1.0), nDirt = planN(tDirtN, vWP.xz*0.2, wn, 1.2), nSand = planN(tSandN, vWP.xz*0.2, wn, 0.8);
           vec3 nRock = triN(tRockN, vWP*0.11, wn, tw);
@@ -97,12 +122,14 @@ export function terrainMaterial({ gloom = false, path = 'rocky_trail' } = {}) {
         }`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = 0.95 - sp.w*0.12 - sp.z*0.05;');
   };
-  mat.customProgramCacheKey = () => 'terrain-v1' + (gloom ? 'g' : '') + path;
+  mat.customProgramCacheKey = () => 'terrain-v1' + (gloom ? 'g' : '') + path + (cheap ? 'c' : '');
   return mat;
 }
 
 // heightfield mesh + splat weights from a height function and a "paint" function
 export function terrainMesh(heightFn, { size, seg, center = [0, 0], splatFn, material }) {
+  // visual only (physics samples heightFn directly), so phones can use a coarser grid
+  if (Q.terrainSeg < 1) seg = seg.map((n) => Math.max(8, Math.round(n * Q.terrainSeg)));
   const g = new THREE.PlaneGeometry(size[0], size[1], seg[0], seg[1]); g.rotateX(-Math.PI / 2);
   g.translate(center[0], 0, center[1]);
   const p = g.attributes.position;
@@ -121,13 +148,13 @@ export function pbr(id, rx = 1, ry = 1, extra = {}) {
   const k = id + rx + ry + JSON.stringify(extra);
   if (pbrCache[k]) return pbrCache[k];
   const t = A.tex[id];
-  const map = t.map.clone(), normalMap = t.normal.clone();
-  for (const x of [map, normalMap]) { x.repeat.set(rx, ry); x.needsUpdate = true; }
+  const map = t.map.clone(), normalMap = t.normal ? t.normal.clone() : null;
+  for (const x of [map, normalMap]) if (x) { x.repeat.set(rx, ry); x.needsUpdate = true; }
   return (pbrCache[k] = new THREE.MeshStandardMaterial({ map, normalMap, roughness: 0.9, ...extra }));
 }
 
 // ---------------- wind (shared by grass, flowers, ferns) ----------------
-function addWind(mat, { strength = 0.25, bendHeight = 0.6, gloom = false, root = 0.0 } = {}) {
+function addWind(mat, { strength = 0.25, bendHeight = 0.6, gloom = false, root = 0.0, fade = 0 } = {}) {
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (sh, r) => {
     prev?.(sh, r);
@@ -158,12 +185,15 @@ function addWind(mat, { strength = 0.25, bendHeight = 0.6, gloom = false, root =
           vec2 d = base.xz - uPush.xy; float dl = length(d);
           float push = (1.0 - smoothstep(0.0, uPush.z, dl)) * uPush.w;
           #ifdef USE_INSTANCING
-          vec2 dirL = (inverse(mat3(instanceMatrix)) * vec3(d.x, 0.0, d.y)).xz;
+          // instances are rotated + uniformly scaled, so the transpose points the same way as the
+          // inverse (only the length differs, and it's normalized below) — and is far cheaper per vertex
+          vec2 dirL = (transpose(mat3(instanceMatrix)) * vec3(d.x, 0.0, d.y)).xz;
           #else
           vec2 dirL = d;
           #endif
           transformed.xz += normalize(dirL + 1e-4) * push * h * 0.6;
           transformed.y -= push * h * 0.25;
+          ${fade ? `transformed *= 1.0 - smoothstep(${(fade * 0.72).toFixed(1)}, ${fade.toFixed(1)}, distance(base, cameraPosition)); // sink into the ground before the chunk is culled` : ''}
         }`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
@@ -173,7 +203,7 @@ function addWind(mat, { strength = 0.25, bendHeight = 0.6, gloom = false, root =
         diffuseColor.rgb *= mix(0.42, 1.0, vH);   // fake AO toward the roots
         ${gloom ? 'float glf = gloomAt(vGW); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.16,0.1,0.22), glf*0.85);' : ''}`);
   };
-  mat.customProgramCacheKey = () => 'wind' + strength + bendHeight + (gloom ? 'g' : '');
+  mat.customProgramCacheKey = () => 'wind' + strength + bendHeight + (gloom ? 'g' : '') + (fade ? 'f' + fade : '');
   return mat;
 }
 
@@ -220,19 +250,50 @@ function chunkList(list, size) {
   return [...map.values()];
 }
 
+// ---------------- quality thinning + distance culling ----------------
+// keep a stable, evenly spread `frac` of a scatter list (hash of the index, not Math.random,
+// so the same clumps survive every time); kept items can be scaled up to hide the gaps
+function thin(list, frac, scale = 1) {
+  if (frac >= 1) return list;
+  const out = [];
+  for (let i = 0; i < list.length; i++) {
+    const h = Math.sin(i * 12.9898 + 78.233) * 43758.5453;
+    if (h - Math.floor(h) < frac) out.push(scale === 1 ? list[i] : { ...list[i], s: list[i].s * scale });
+  }
+  return out;
+}
+// chunks further than `dist` from the camera are hidden (cullNature runs once per frame)
+function cullable(scene, meshes, dist) {
+  if (!dist) return;
+  const L = (scene.userData.cull ||= []);
+  for (const m of meshes) { if (!m.boundingSphere) m.computeBoundingSphere(); L.push({ m, dist }); }
+}
+export function cullNature(scene, camera) {
+  const L = scene.userData.cull;
+  if (!L) return;
+  const p = camera.position;
+  for (let i = 0; i < L.length; i++) {
+    const { m, dist } = L[i], b = m.boundingSphere;
+    m.visible = b.center.distanceTo(p) - b.radius < dist;
+  }
+}
+
 // Grass: ez-tree clump cards, thousands of them, chunked so off-screen tiles cull.
 export function plantGrass(scene, spots, { gloom = false } = {}) {
   const src = A.models.grass.clone(true);
   src.traverse((o) => {
     if (o.isMesh) {
       const map = o.material.map;
-      o.material = new THREE.MeshStandardMaterial({ map, alphaTest: 0.3, alphaToCoverage: true, side: THREE.DoubleSide, roughness: 0.85, color: new THREE.Color(0.75, 0.82, 0.62) });
+      // alpha-to-coverage needs MSAA; without it the soft alpha edge just reads as fat cards
+      o.material = new THREE.MeshStandardMaterial({ map, alphaTest: 0.3, alphaToCoverage: Q.msaa > 0, side: THREE.DoubleSide, roughness: 0.85, color: new THREE.Color(0.75, 0.82, 0.62) });
     }
   });
-  return instanceModel(scene, src, spots, {
-    wind: { strength: 0.18, bendHeight: grassHeight(), gloom }, castShadow: false, chunk: 14,
+  const out = instanceModel(scene, src, thin(spots, Q.grass, Q.grassScale), {
+    wind: { strength: 0.18, bendHeight: grassHeight(), gloom, fade: Q.grassDist }, castShadow: false, chunk: 14,
     tint: (c, it) => c.setHSL(0.21 + it.hue * 0.07, 0.5 + it.hue * 0.2, 0.36 + it.lum * 0.2),
   });
+  cullable(scene, out, Q.grassDist);
+  return out;
 }
 
 let _gh = null;
@@ -245,27 +306,29 @@ export function modelSize(key) { const b = new THREE.Box3().setFromObject(A.mode
 
 export function plantFlowers(scene, spots) {
   const out = [];
+  spots = thin(spots, Q.flowers);
   ['white', 'blue', 'yellow'].forEach((c, i) => {
     const L = spots.filter((_, k) => k % 3 === i);
     if (!L.length) return;
     const src = A.models['flower_' + c].clone(true);
     src.traverse((o) => { if (o.isMesh) o.material = new THREE.MeshStandardMaterial({ map: o.material.map, color: o.material.color, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.8 }); });
-    out.push(...instanceModel(scene, src, L, { wind: { strength: 0.12, bendHeight: modelSize('flower_' + c).y }, castShadow: false, chunk: 20 }));
+    out.push(...instanceModel(scene, src, L, { wind: { strength: 0.12, bendHeight: modelSize('flower_' + c).y }, castShadow: false, chunk: Q.tier === 'high' ? 20 : 40 }));
   });
+  cullable(scene, out, Q.grassDist && Q.grassDist + 10);
   return out;
 }
 
 export function plantFerns(scene, spots) {
   const src = A.models.fern.clone(true);
   src.traverse((o) => { if (o.isMesh) { o.material = o.material.clone(); o.material.alphaTest = 0.5; o.material.side = THREE.DoubleSide; } });
-  return instanceModel(scene, src, spots, { wind: { strength: 0.08, bendHeight: modelSize('fern').y } });
+  return instanceModel(scene, src, thin(spots, Q.ferns), { wind: { strength: 0.08, bendHeight: modelSize('fern').y }, castShadow: Q.propShadows });
 }
 
 export function placeRocks(scene, spots) {
   const out = [];
   [1, 2, 3].forEach((n, i) => {
     const L = spots.filter((_, k) => k % 3 === i);
-    if (L.length) out.push(...instanceModel(scene, A.models['rock' + n].clone(true), L));
+    if (L.length) out.push(...instanceModel(scene, A.models['rock' + n].clone(true), L, { castShadow: Q.propShadows }));
   });
   return out;
 }
@@ -279,12 +342,21 @@ export function treeVariant(preset, seed) {
   const t = new Tree();
   t.loadPreset(preset);
   t.options.seed = seed;
+  if (Q.treeDetail < 1) {
+    // phones: fewer rings per branch and thinner tubes; same silhouette, roughly half the triangles
+    const B = t.options.branch;
+    for (const k in B.sections) B.sections[k] = Math.max(2, Math.round(B.sections[k] * Q.treeDetail));
+    for (const k in B.segments) B.segments[k] = Math.max(3, B.segments[k] - 2);
+    // one leaf card instead of two crossed ones (half the alpha-tested overdraw), a bit bigger
+    t.options.leaves.billboard = 'single';
+    t.options.leaves.size *= 1.2;
+  }
   t.generate();
   // ez-tree's leaf shader replaces project_vertex and ignores instanceMatrix, so every
   // instanced tree's leaves would pile up at the origin. Swap in an instancing-aware leaf material.
   const b = new THREE.Box3().setFromObject(t);
   const old = t.leavesMesh.material;
-  const lm = new THREE.MeshStandardMaterial({ map: old.map, color: old.color, side: THREE.DoubleSide, alphaTest: 0.25, alphaToCoverage: true, roughness: 0.75 });
+  const lm = new THREE.MeshStandardMaterial({ map: old.map, color: old.color, side: THREE.DoubleSide, alphaTest: 0.25, alphaToCoverage: Q.msaa > 0, roughness: 0.75 });
   addWind(lm, { strength: 0.9, bendHeight: b.max.y - b.min.y, root: 0.55 });
   t.leavesMesh.material = lm;
   return (treeCache[key] = { tree: t, height: b.max.y - b.min.y });
@@ -330,7 +402,7 @@ export function makeWater(scene, { size = 600, level = 0, hTex, hBox, deep = '#0
         float sh = 1.0 - smoothstep(0.0, 4.5, depth);
         vec3 col = mix(uDeep, uShallow, sh*sh);
         float clarity = smoothstep(0.0, 3.0, depth);   // shallows are see-through
-        float fn = vnoise(vec3(vW.xz*0.7, uTime*0.6));
+        ${Q.waterCheap ? 'float fn = 0.5 + 0.3*sin(vW.x*0.9 + uTime*0.6)*sin(vW.z*0.8 - uTime*0.5);' : 'float fn = vnoise(vec3(vW.xz*0.7, uTime*0.6));'}
         float foam = smoothstep(0.45, 0.05, depth + fn*0.35 - 0.05 + sin(uTime*1.4 + depth*5.0)*0.06);
         foam += smoothstep(0.06, 0.0, abs(depth - 0.7 - sin(uTime*0.8)*0.25 - fn*0.3)) * 0.45 * sh;
         col = mix(col, vec3(0.95), clamp(foam, 0.0, 1.0)*0.85);
@@ -347,7 +419,7 @@ export function makeWater(scene, { size = 600, level = 0, hTex, hBox, deep = '#0
         }`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(0.06, 0.9, waterFoam);');
   };
-  mat.customProgramCacheKey = () => 'water-v3';
+  mat.customProgramCacheKey = () => 'water-v3' + (Q.waterCheap ? 'c' : '');
   const m = new THREE.Mesh(geo, mat); m.position.y = level; m.receiveShadow = true;
   scene.add(m);
   return { mesh: m, update() {} };

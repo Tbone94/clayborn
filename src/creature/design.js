@@ -1,6 +1,7 @@
 // The editable creature: 7 painted layers + look settings.
 import { LAYERS } from './frames.js';
 import { GRID, X0, X1, Y0, Y1 } from './field.js';
+import { packAddons, unpackAddons } from './addons.js';
 
 export const PAINT = 384; // paint canvas resolution per layer
 
@@ -16,7 +17,7 @@ export function newDesign(frame = 'biped') {
   return {
     frame, name: 'Blobbo', layers, thick, version,
     color: '#ef7d57', color2: '#ffd36e', pattern: 'spots', finish: 'clay',
-    eyes: 'googly', eyeSize: 1, mouth: 'smile',
+    eyes: 'googly', eyeSize: 1, mouth: 'smile', addons: [],
   };
 }
 
@@ -116,7 +117,7 @@ export function clearLayer(design, id) {
 
 export function cloneDesign(d) {
   const n = newDesign(d.frame);
-  Object.assign(n, { ...d, layers: n.layers, thick: { ...d.thick }, version: { ...d.version } });
+  Object.assign(n, { ...d, layers: n.layers, thick: { ...d.thick }, version: { ...d.version }, addons: (d.addons || []).map((a) => ({ ...a, p: [...a.p], n: [...a.n] })) });
   for (const id of LAYERS) n.layers[id].getContext('2d').drawImage(d.layers[id], 0, 0);
   return n;
 }
@@ -140,13 +141,14 @@ export function encodeDesign(d) {
     parts[id] = runs.join('.');
   }
   const meta = { f: d.frame, n: d.name, t: d.thick, c: d.color, c2: d.color2, p: d.pattern, fi: d.finish, e: d.eyes, es: d.eyeSize, m: d.mouth, L: parts };
+  if (d.addons?.length) meta.a = packAddons(d.addons);
   return btoa(unescape(encodeURIComponent(JSON.stringify(meta)))).replace(/=+$/, '');
 }
 
 export function decodeDesign(code) {
   const meta = JSON.parse(decodeURIComponent(escape(atob(code.trim()))));
   const d = newDesign(meta.f);
-  Object.assign(d, { name: meta.n, color: meta.c, color2: meta.c2, pattern: meta.p, finish: meta.fi, eyes: meta.e, eyeSize: meta.es, mouth: meta.m || 'smile' });
+  Object.assign(d, { name: meta.n, color: meta.c, color2: meta.c2, pattern: meta.p, finish: meta.fi, eyes: meta.e, eyeSize: meta.es, mouth: meta.m || 'smile', addons: unpackAddons(meta.a) });
   Object.assign(d.thick, meta.t);
   const c = document.createElement('canvas'); c.width = c.height = CODE_RES;
   const ctx = c.getContext('2d');

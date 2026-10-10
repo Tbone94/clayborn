@@ -20,6 +20,9 @@ npm run build      # static site in dist/ — drop it on itch.io / GitHub Pages 
    Stomper (all-rounder) · Prowler (fast + steady) · Bouncer (big jumps) · Slither (super swimmer) · Flapper (flaps again in mid-air) · Skitter (never falls over) · Roly (rolls and body-slams).
 2. **Draw it step by step** in the Mold Lab, like Amazing Island: Body → Head → Legs → Arms → Tail → Wings → Horns. Close a loop and it fills in, or use the Oval stamp. Optional parts can be skipped.
 3. Watch it **inflate into clay** on the turntable as you draw. Click it to poke it.
+   The Mold Lab has three steps along the top: **1 Shape** (draw), **2 Paint** (colors, pattern, finish, eyes, mouth) and **3 Add-ons**.
+   On Add-ons, pick a piece (horns, claws, an extra googly eye, a propeller hat, a chicken foot…) and tap your monster to stick it on.
+   Drag it to move it; size, turn, tilt, color and mirror-to-the-other-side are below. Pieces ride along on the nearest bone.
 4. **Bring it to life.** Every monster you make keeps living on the island Chao-Garden-style. They wander, nap, play, gossip with each other and greet you. Pet them (E), and swap to play as any of them (F).
 5. Three areas of the island are covered in the Gloom.
 6. Win each area's event to wash its Gloom away:
@@ -47,12 +50,14 @@ No 3D models, no textures, no audio files. Everything is generated from your dra
 | Look | Custom clay shader: fingerprints and bumps, patterns painted in rest-pose space (spots, stripes, lava, stars…), clay / felt / vinyl / jelly finishes, tilt-shift "diorama" post-processing. |
 | Sound | WebAudio synths: kalimba music, squishes, and Animal-Crossing-style babble voices pitched by body mass. |
 
-Share a creature with the **Share** button (a compact code), or link to `…/#c=<code>`.
+Share a creature with the **Share** button (a compact code), or link to `…/#c=<code>`. Add-ons travel with the code.
+
+**Install it on a phone:** it's a PWA. On Android/Chrome tap *Install the app* on the title screen (or the browser's install prompt); on iPhone use Safari → Share → *Add to Home Screen*. Once you've played it, it works offline (`public/sw.js` caches what the game loads).
 
 ## Project layout
 
 ```
-src/creature/  field.js (EDT + Poisson) · builder.js (SDF, joints, mesh, skinning) · mesher.js (surface nets)
+src/creature/  field.js (EDT + Poisson) · builder.js (SDF, joints, mesh, skinning) · mesher.js (surface nets) · addons.js (stick-on pieces)
                creature.js (rig, gait, googly eyes) · stats.js · generator.js (procedural doodler) · frames.js
 src/ui/        creator.js (sketchbook) · input.js
 src/scenes/    studio.js · island.js · common.js (water, sky, particles, props)
@@ -70,6 +75,7 @@ The monsters are generated from your drawing. The world uses free assets, downlo
 - **[Poly Haven](https://polyhaven.com)** (CC0): the `kloofendal_48d_partly_cloudy_puresky` HDRI sky, PBR textures (coast sand, rock face, forest ground, rocky trail, bark, wood planks, stone wall, stone tiles, aerial grass) and the `fern_02` model.
 - **[ez-tree](https://github.com/dgreenheck/ez-tree)** by Daniel Greenheck (MIT): the procedural tree generator, plus grass, flower, rock and ground assets from its demo.
 - **[three.js](https://threejs.org)** (MIT): the renderer and the water normal map.
+- **Add-on models** in `public/assets/addons/` from [Poly Pizza](https://poly.pizza) (CC-BY 3.0, mostly "Poly by Google"; CC0 from Quaternius and iPoly3D) and [Kenney](https://kenney.nl) (CC0). Every model's author, license and link is in `public/assets/addons/CREDITS.json`, and the game shows them under **Credits** on the title screen. The procedural pieces (horn, spike, claw, eye, hats…) are built in `src/creature/addons.js`.
 
 ## Trailer
 

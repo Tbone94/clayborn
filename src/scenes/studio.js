@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { makeClayMaterial } from '../fx/clay.js';
 import { babble, sfx } from '../fx/audio.js';
+import { QUALITY } from '../fx/quality.js';
 
 export class Studio {
   constructor(app) {
@@ -18,7 +19,7 @@ export class Studio {
     s.add(new THREE.HemisphereLight('#fff1dc', '#3a2f5a', 1.25));
     const key = new THREE.DirectionalLight('#fff3e0', 2.4);
     key.position.set(3.5, 6, 4); key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.mapSize.setScalar(Math.min(2048, QUALITY.shadowMap));
     Object.assign(key.shadow.camera, { left: -3, right: 3, top: 3, bottom: -3, near: 0.5, far: 20 });
     key.shadow.bias = -0.0004; key.shadow.normalBias = 0.02; key.shadow.radius = 4;
     s.add(key);
@@ -64,18 +65,27 @@ export class Studio {
 
   popIn() { this.squash = 1; }
 
-  layout(leftPx, rightPx) { this.left = leftPx; this.right = rightPx; this.resize(); }
+  layout(leftPx, rightPx) { this.setRegion({ x0: leftPx, y0: 0, x1: window.innerWidth - rightPx, y1: window.innerHeight }); }
+  // frame the creature inside the screen rect the UI leaves free (eases there in update)
+  setRegion(r, instant = false) {
+    this.region = r;
+    if (instant || !this.view) this.view = this.targetView();
+    this.resize();
+  }
+  targetView() {
+    const W = window.innerWidth, H = window.innerHeight;
+    const r = this.region || { x0: 0, y0: 0, x1: W, y1: H };
+    const rw = Math.max(40, r.x1 - r.x0), rh = Math.max(40, r.y1 - r.y0);
+    // at zoom 1 the creature fills roughly half the screen height
+    const zoom = Math.min(1, 1.9 * rh / H, 1.8 * rw / H);
+    return { ox: W / 2 - (r.x0 + r.x1) / 2, oy: H / 2 - (r.y0 + r.y1) / 2, zoom };
+  }
   resize() {
     const W = window.innerWidth, H = window.innerHeight;
     this.camera.aspect = W / H;
-    const narrow = W <= 900;
-    if (narrow) {
-      // creature sits in the strip between the top bar and the paper sheet
-      this.camera.setViewOffset(W, H, 0, H * 0.22, W, H);
-    } else {
-      const cx = (this.left + (W - this.right)) / 2;
-      this.camera.setViewOffset(W, H, W / 2 - cx, 0, W, H);
-    }
+    const v = this.view || this.targetView();
+    this.camera.zoom = v.zoom;
+    this.camera.setViewOffset(W, H, v.ox, v.oy, W, H);
     this.camera.updateProjectionMatrix();
   }
 
@@ -96,7 +106,13 @@ export class Studio {
 
   update(dt, t) {
     const c = this.creature;
-    if (!this.dragging) { this.spinVel *= Math.pow(0.05, dt); this.spin += this.spinVel + dt * 0.25; }
+    if (!this.dragging) { this.spinVel *= Math.pow(0.05, dt); this.spin += this.spinVel + (this.autoSpin === false ? 0 : dt * 0.25); }
+    if (this.region) {
+      const tv = this.targetView(), v = this.view, k = Math.min(1, dt * 8);
+      if (Math.abs(tv.ox - v.ox) + Math.abs(tv.oy - v.oy) + Math.abs(tv.zoom - v.zoom) * 100 > 0.5) {
+        v.ox += (tv.ox - v.ox) * k; v.oy += (tv.oy - v.oy) * k; v.zoom += (tv.zoom - v.zoom) * k; this.resize();
+      }
+    }
     this.holder.rotation.y = this.spin;
     this.pedestal.rotation.y = this.spin;
     // poke hop
@@ -115,7 +131,7 @@ export class Studio {
       const target = 0.32 + h * 0.5;
       this.lookAt.y += (target - this.lookAt.y) * Math.min(1, dt * 3);
       let dist = 3.8 + Math.max(h, (c.size || 1) * 0.8) * 1.6;
-      if (this.camera.aspect < 1) dist *= 0.8 / this.camera.aspect;
+      if (this.camera.aspect < 1 && !this.region) dist *= 0.8 / this.camera.aspect;
       this.camDist = (this.camDist ?? dist) + (dist - (this.camDist ?? dist)) * Math.min(1, dt * 3);
     }
     const d = this.camDist ?? 6;

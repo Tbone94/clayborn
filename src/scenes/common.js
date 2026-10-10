@@ -1,6 +1,7 @@
 // Shared world-building: light, sky, toy-ocean, particles and clay props.
 import * as THREE from 'three';
 import { makeClayMaterial, NOISE_GLSL } from '../fx/clay.js';
+import { QUALITY as Q } from '../fx/quality.js';
 
 export function setupLights(scene, app, { size = 30, sky = '#fff1dc', ground = '#b98a6a' } = {}) {
   scene.environment = app.gfx.envMap; scene.environmentIntensity = 0.3;
@@ -92,8 +93,9 @@ export function makeWater(scene, { size = 400, level = 0, hTex, hBox, deep = '#2
 }
 
 // ---------- particles: dust, splash, confetti, sparkles, gloom motes ----------
+const _c = new THREE.Color();
 export class Particles {
-  constructor(scene, max = 1500) {
+  constructor(scene, max = Q.particles) {
     this.max = max; this.n = 0;
     const g = new THREE.BufferGeometry();
     this.pos = new Float32Array(max * 3); this.col = new Float32Array(max * 3); this.size = new Float32Array(max);
@@ -112,19 +114,21 @@ export class Particles {
     this.points = new THREE.Points(g, mat); this.points.frustumCulled = false; scene.add(this.points);
   }
   emit(x, y, z, { count = 10, color = '#ffffff', colors, speed = 3, up = 2, spread = 1, gravity = 9, size = 0.25, life = 0.8 } = {}) {
-    const c = new THREE.Color();
+    const c = _c;
     for (let k = 0; k < count; k++) {
       const i = this.n < this.max ? this.n++ : (Math.random() * this.max) | 0;
       const a = Math.random() * Math.PI * 2, s = speed * (0.4 + Math.random() * 0.6);
-      this.pos.set([x + (Math.random() - 0.5) * spread * 0.3, y, z + (Math.random() - 0.5) * spread * 0.3], i * 3);
-      this.vel.set([Math.cos(a) * s * spread, up * (0.5 + Math.random()), Math.sin(a) * s * spread], i * 3);
+      const i3 = i * 3;
+      this.pos[i3] = x + (Math.random() - 0.5) * spread * 0.3; this.pos[i3 + 1] = y; this.pos[i3 + 2] = z + (Math.random() - 0.5) * spread * 0.3;
+      this.vel[i3] = Math.cos(a) * s * spread; this.vel[i3 + 1] = up * (0.5 + Math.random()); this.vel[i3 + 2] = Math.sin(a) * s * spread;
       c.set(colors ? colors[(Math.random() * colors.length) | 0] : color);
-      this.col.set([c.r, c.g, c.b], i * 3);
+      this.col[i3] = c.r; this.col[i3 + 1] = c.g; this.col[i3 + 2] = c.b;
       this.s0[i] = size * (0.6 + Math.random() * 0.8); this.life[i] = life * (0.6 + Math.random() * 0.6); this.age[i] = 0; this.grav[i] = gravity;
     }
   }
   update(dt) {
     let w = 0;
+    const drag = Math.pow(0.4, dt);
     for (let i = 0; i < this.n; i++) {
       this.age[i] += dt;
       if (this.age[i] >= this.life[i]) continue;
@@ -133,14 +137,15 @@ export class Particles {
         this.age[w] = this.age[i]; this.life[w] = this.life[i]; this.grav[w] = this.grav[i]; this.s0[w] = this.s0[i];
       }
       this.vel[w * 3 + 1] -= this.grav[w] * dt;
-      const drag = Math.pow(0.4, dt);
       this.vel[w * 3] *= drag; this.vel[w * 3 + 2] *= drag;
       this.pos[w * 3] += this.vel[w * 3] * dt; this.pos[w * 3 + 1] += this.vel[w * 3 + 1] * dt; this.pos[w * 3 + 2] += this.vel[w * 3 + 2] * dt;
       const t = this.age[w] / this.life[w];
       this.size[w] = this.s0[w] * Math.sin(Math.min(1, t * 4) * Math.PI * 0.5) * (1 - t * t);
       w++;
     }
+    const was = this.n;
     this.n = w;
+    if (!w && !was) return; // nothing alive: don't re-upload the buffers
     const g = this.points.geometry;
     g.setDrawRange(0, this.n);
     g.attributes.position.needsUpdate = g.attributes.color.needsUpdate = g.attributes.size.needsUpdate = true;

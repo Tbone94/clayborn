@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { analyze, buildGeometry, facePlacement } from './builder.js';
 import { computeStats } from './stats.js';
 import { makeClayMaterial, updateClayMaterial } from '../fx/clay.js';
+import { ADDONS, makePiece, nearestSkin, pieceQuaternion } from './addons.js';
 
 const _v = new THREE.Vector3(), _q = new THREE.Quaternion(), _g = new THREE.Vector3();
 
@@ -11,6 +12,7 @@ const eyeBlack = new THREE.MeshPhysicalMaterial({ color: 0x14121a, roughness: 0.
 const mouthMat = new THREE.MeshStandardMaterial({ color: 0x2a1418, roughness: 0.6 });
 const toothMat = new THREE.MeshStandardMaterial({ color: 0xfffaf0, roughness: 0.3 });
 const sphere = new THREE.SphereGeometry(1, 24, 16);
+const PROXY_MAT = new THREE.MeshBasicMaterial();
 
 export class Creature {
   constructor(design, { detail = 64 } = {}) {
@@ -32,7 +34,8 @@ export class Creature {
     this.stats = computeStats(A);
     if (this.mesh) { this.inner.remove(this.mesh); this.mesh.geometry.dispose(); }
     if (this.rootBone) this.inner.remove(this.rootBone);
-    this.mesh = null; this.bones = []; this.eyes = []; this.mouth = null;
+    if (this.proxy) { this.inner.remove(this.proxy); this.proxy = null; }
+    this.mesh = null; this.bones = []; this.eyes = []; this.mouth = null; this.addonObjs = []; this.wigglers = [];
     if (A.empty) { this.height = 0.6; this.size = 1; return; }
 
     const geo = buildGeometry(A, detail);
@@ -60,11 +63,47 @@ export class Creature {
     this.group.updateMatrixWorld(true);
     mesh.bind(new THREE.Skeleton(bones));
     this.mesh = mesh; this.bones = bones;
+    // an invisible rest-pose copy: cheap, exact picking for the add-on editor
+    this.proxy = new THREE.Mesh(geo, PROXY_MAT); this.proxy.visible = false;
+    this.inner.add(this.proxy);
     this.height = bb.max.y - bb.min.y;
     this.size = Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z);
     this.buildFace(A, design);
+    this.buildAddons(design);
     updateClayMaterial(this.material, design);
   }
+
+  // stick-on pieces: each rides on the bone that owns the nearest bit of skin
+  buildAddons(design) {
+    for (const o of this.addonObjs) o.obj.parent?.remove(o.obj);
+    this.eyes = this.eyes.filter((e) => !e.userData.addon);
+    this.addonObjs = []; this.wigglers = [];
+    if (!this.mesh || !design.addons?.length) return;
+    const A = this.analysis, geo = this.mesh.geometry;
+    design.addons.forEach((a, index) => {
+      for (const side of a.mirror ? [1, -1] : [1]) {
+        let p = [a.p[0], a.p[1], a.p[2] * side], n = [a.n[0], a.n[1], a.n[2] * side];
+        const near = nearestSkin(geo, p);
+        if (near.dist > 0.035) { p = near.p; n = near.n; } // body was redrawn: hop onto the new skin
+        const obj = makePiece(a, design);
+        if (!obj) continue;
+        const bp = A.bones[near.bone].pos;
+        const s = a.s;
+        // sink the base a little so it looks pressed into the clay
+        obj.position.set(p[0] - bp[0] - n[0] * s * 0.12, p[1] - bp[1] - n[1] * s * 0.12, p[2] - bp[2] - n[2] * s * 0.12);
+        pieceQuaternion(n, a.turn * side, a.tilt, obj.quaternion);
+        obj.scale.setScalar(s);
+        obj.userData.addonIndex = index;
+        obj.traverse((o) => { o.userData.addonIndex = index; });
+        this.bones[near.bone].add(obj);
+        this.addonObjs.push({ obj, index, side });
+        if (ADDONS[a.type].wiggle) this.wigglers.push({ obj, base: obj.quaternion.clone(), ph: index * 1.7 + side });
+        if (obj.userData.eye) { obj.userData.eye.userData.addon = true; this.eyes.push(obj.userData.eye); }
+      }
+    });
+  }
+
+  rebuildAddons(design) { this.design = design; this.buildAddons(design); }
 
   buildFace(A, design) {
     const face = facePlacement(A, design);
@@ -145,9 +184,9 @@ export class Creature {
 
   rebuildFace(design) {
     if (!this.mesh) return;
-    for (const e of this.eyes) e.parent?.remove(e);
+    for (const e of this.eyes) if (!e.userData.addon) e.parent?.remove(e);
     if (this.mouth) this.mouth.parent?.remove(this.mouth);
-    this.eyes = []; this.mouth = null;
+    this.eyes = this.eyes.filter((e) => e.userData.addon); this.mouth = null;
     this.buildFace(this.analysis, design);
   }
 
@@ -250,6 +289,14 @@ export class Creature {
           break;
         }
       }
+    }
+    // held still in the rest pose while pieces are being stuck on
+    if (this.frozen) for (const bone of this.bones) { bone.rotation.set(0, 0, 0); bone.position.copy(bone.userData.rest); bone.scale.set(1, 1, 1); }
+    // antennae and flowers boing about
+    for (const w of this.wigglers) {
+      const k = 0.08 + 0.3 * move + (air ? 0.25 : 0);
+      w.obj.quaternion.copy(w.base);
+      w.obj.rotateX(Math.sin(t * 7 + w.ph) * k); w.obj.rotateZ(Math.cos(t * 5.3 + w.ph) * k * 0.7);
     }
     if (M.land) M.land = Math.max(0, M.land - dt * 4);
     this.updateEyes(dt);

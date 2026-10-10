@@ -2,7 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#15172b" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Clayborn" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
   <title>Clayborn — draw a monster, save the island</title>
   <meta name="description" content="Draw a creature. It inflates into living clay. Its shape decides how it runs, glides and swims. Win events to wash the Gloom off the island." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -29,6 +37,7 @@
         <button class="menu-item" id="btn-code"><i id="code-no">03</i><b>Paste a code<small>Load a creature a friend shared</small></b><small>読込</small></button>
       </nav>
       <p class="lore">An island swallowed by the Gloom. Only monsters made of clay and imagination can wash it away.</p>
+      <div class="title-links"><button class="link-btn hidden" id="btn-install">Install the app</button><button class="link-btn" id="btn-credits">Credits</button></div>
     </div>
     <div class="box-sticker" aria-hidden="true">
       <div class="barcode"></div>
@@ -47,67 +56,104 @@
   </section>
 
   <!-- CREATOR: mold lab -->
-  <section id="creator" class="screen hidden">
+  <section id="creator" class="screen hidden" data-phase="shape">
     <div class="panel paper-panel">
       <div class="panel-title"><button class="exit" id="btn-exit" title="Leave without saving">◀ Back</button><b>MOLD LAB</b><span class="jp">型取り</span><span class="code">FORM-A</span></div>
-      <div class="frames" id="frames"></div>
-      <div class="step-bar" id="step-bar">
-        <span class="no" id="step-no">STEP 1/7</span>
-        <span class="txt" id="step-txt">Draw the BODY<small>Draw an outline. It fills in when you close the loop.</small></span>
-        <button class="btn small ghost" id="step-back">Back</button>
-        <button class="btn small" id="step-next">Next</button>
+      <nav class="phase-tabs" id="phase-tabs">
+        <button class="phase-tab on" data-phase="shape"><i>1</i><b>Shape</b><small>形</small></button>
+        <button class="phase-tab" data-phase="paint"><i>2</i><b>Paint</b><small>色</small></button>
+        <button class="phase-tab" data-phase="addons"><i>3</i><b>Add-ons</b><small>部品</small></button>
+      </nav>
+
+      <div class="pane pane-shape" data-pane="shape">
+        <div class="frames" id="frames"></div>
+        <div class="step-bar" id="step-bar">
+          <span class="no" id="step-no">STEP 1/7</span>
+          <span class="txt" id="step-txt">Draw the BODY<small>Draw an outline. It fills in when you close the loop.</small></span>
+          <button class="btn small ghost" id="step-back">Back</button>
+          <button class="btn small" id="step-next">Next</button>
+        </div>
+        <div class="part-tabs" id="part-tabs"></div>
+        <div class="paper-wrap">
+          <i class="reg tl"></i><i class="reg tr"></i><i class="reg bl"></i><i class="reg br"></i>
+          <canvas id="paper"></canvas>
+          <div class="paper-hint" id="paper-hint"></div>
+          <div class="paper-empty" id="paper-empty"><b>DRAW HERE</b><span>closed loops fill in by themselves</span></div>
+          <button class="btn small guide-btn hidden" id="btn-guide">Use guide shape</button>
+        </div>
+        <div class="tools">
+          <div class="tool-group">
+            <button class="tool on" data-tool="brush" title="Brush (B)"><b>筆</b><small>BRUSH</small></button>
+            <button class="tool" data-tool="eraser" title="Eraser (E)"><b>消</b><small>ERASE</small></button>
+            <button class="tool" data-tool="oval" title="Oval stamp (O): drag to place a blob"><b>◯</b><small>OVAL</small></button>
+          </div>
+          <div class="tool-group sizes" id="sizes">
+            <button class="size" data-size="6" title="Size S"><i style="--s:4px"></i></button>
+            <button class="size on" data-size="12" title="Size M"><i style="--s:8px"></i></button>
+            <button class="size" data-size="22" title="Size L"><i style="--s:13px"></i></button>
+            <button class="size" data-size="38" title="Size XL"><i style="--s:19px"></i></button>
+          </div>
+          <button class="tool mobile-only" id="btn-size-m" title="Brush size"><i class="dot" id="size-dot"></i><small>SIZE</small></button>
+          <div class="tool-group">
+            <button class="tool" id="btn-undo" title="Undo (Ctrl+Z)"><b>↺</b><small>UNDO</small></button>
+            <button class="tool" id="btn-redo" title="Redo (Ctrl+Shift+Z)"><b>↻</b><small>REDO</small></button>
+          </div>
+          <button class="tool mobile-only" id="btn-more" title="More tools"><b>⋯</b><small>MORE</small></button>
+          <div class="tools-extra" id="tools-extra">
+            <div class="tool-group">
+              <button class="tool" id="btn-clear" title="Clear the selected part"><b>✕</b><small>PART</small></button>
+              <button class="tool danger" id="btn-clear-all" title="Wipe every part and start over"><b>✕</b><small>ALL</small></button>
+            </div>
+            <label class="slider-row" title="How puffy the selected part is"><span>CHUB</span><input type="range" id="puff" min="0.35" max="1.9" step="0.01" value="1" /><b id="puff-val">100%</b></label>
+          </div>
+        </div>
       </div>
-      <div class="part-tabs" id="part-tabs"></div>
-      <div class="paper-wrap">
-        <i class="reg tl"></i><i class="reg tr"></i><i class="reg bl"></i><i class="reg br"></i>
-        <canvas id="paper"></canvas>
-        <div class="paper-hint" id="paper-hint"></div>
-        <div class="paper-empty" id="paper-empty"><b>DRAW HERE</b><span>closed loops fill in by themselves</span></div>
-        <button class="btn small guide-btn hidden" id="btn-guide">Use guide shape</button>
+
+      <div class="pane pane-paint hidden" data-pane="paint">
+        <div class="pane-scroll">
+          <h3><span>MAIN COLOR</span><i>色</i></h3>
+          <div class="swatches" id="sw-a"></div>
+          <h3><span>ACCENT COLOR</span><em>used by the pattern</em></h3>
+          <div class="swatches" id="sw-b"></div>
+          <h3><span>PATTERN</span><i>模様</i></h3>
+          <div class="chips" id="patterns"></div>
+          <h3><span>FINISH</span><i>質感</i></h3>
+          <div class="chips" id="finishes"></div>
+          <h3><span>EYES</span><i>目</i><input type="range" id="eye-size" min="0.6" max="1.8" step="0.01" value="1" title="Eye size" /></h3>
+          <div class="chips" id="eyes"></div>
+          <h3><span>MOUTH</span><i>口</i></h3>
+          <div class="chips" id="mouths"></div>
+        </div>
+        <div class="pane-next"><button class="btn small" data-go="shape">◀ Shape</button><button class="btn primary" data-go="addons">Next: Add-ons ▶</button></div>
       </div>
-      <div class="tools">
-        <div class="tool-group">
-          <button class="tool on" data-tool="brush" title="Brush (B)"><b>筆</b><small>BRUSH</small></button>
-          <button class="tool" data-tool="eraser" title="Eraser (E)"><b>消</b><small>ERASE</small></button>
-          <button class="tool" data-tool="oval" title="Oval stamp (O): drag to place a blob"><b>◯</b><small>OVAL</small></button>
+
+      <div class="pane pane-addons hidden" data-pane="addons">
+        <div class="addon-hint" id="addon-hint">Pick a piece, then tap your monster to stick it on.</div>
+        <div class="addon-grid" id="addon-grid"></div>
+        <div class="addon-edit hidden" id="addon-edit">
+          <div class="ae-head">
+            <b id="ae-name">Horn</b>
+            <button class="tool" id="ae-mirror" title="Copy it onto the other side"><b>⇋</b><small>MIRROR</small></button>
+            <button class="tool danger" id="ae-delete" title="Remove this piece"><b>✕</b><small>REMOVE</small></button>
+            <button class="tool" id="ae-done" title="Done with this piece"><b>✓</b><small>DONE</small></button>
+          </div>
+          <label class="slider-row"><span>SIZE</span><input type="range" id="ae-size" min="0.4" max="2.6" step="0.01" value="1" /></label>
+          <label class="slider-row"><span>TURN</span><input type="range" id="ae-turn" min="-3.14" max="3.14" step="0.01" value="0" /></label>
+          <label class="slider-row"><span>TILT</span><input type="range" id="ae-tilt" min="-1.3" max="1.3" step="0.01" value="0" /></label>
+          <div class="swatches" id="ae-colors"></div>
         </div>
-        <div class="tool-group sizes" id="sizes">
-          <button class="size" data-size="6" title="Size S"><i style="--s:4px"></i></button>
-          <button class="size on" data-size="12" title="Size M"><i style="--s:8px"></i></button>
-          <button class="size" data-size="22" title="Size L"><i style="--s:13px"></i></button>
-          <button class="size" data-size="38" title="Size XL"><i style="--s:19px"></i></button>
-        </div>
-        <div class="tool-group">
-          <button class="tool" id="btn-undo" title="Undo (Ctrl+Z)"><b>↺</b><small>UNDO</small></button>
-          <button class="tool" id="btn-redo" title="Redo (Ctrl+Shift+Z)"><b>↻</b><small>REDO</small></button>
-          <button class="tool" id="btn-clear" title="Clear the selected part"><b>✕</b><small>PART</small></button>
-          <button class="tool danger" id="btn-clear-all" title="Wipe every part and start over"><b>✕</b><small>ALL</small></button>
-        </div>
-        <label class="slider-row" title="How puffy the selected part is"><span>CHUB</span><input type="range" id="puff" min="0.35" max="1.9" step="0.01" value="1" /><b id="puff-val">100%</b></label>
+        <div class="pane-next"><button class="btn small" id="addon-undo">Undo</button><button class="btn small" id="addon-clear">Remove all</button><button class="btn primary" id="btn-done-2">Bring to life ▶</button></div>
       </div>
     </div>
 
     <div class="panel look-panel">
       <div class="panel-title"><b>SPEC CARD</b><span class="jp">仕様</span><span class="code" id="spec-no">#000</span></div>
       <div class="name-row">
-        <input id="name" maxlength="16" spellcheck="false" />
+        <button class="tool mobile-only" id="btn-exit-m" title="Leave without saving"><b>◀</b><small>BACK</small></button>
+        <input id="name" maxlength="16" spellcheck="false" aria-label="Monster name" />
         <button class="tool" id="btn-rename" title="Random name"><b>名</b><small>NAME</small></button>
-        <button class="tool mobile-only" id="btn-style" title="Colors & stats"><b>色</b><small>STYLE</small></button>
       </div>
       <div class="stats" id="stats"></div>
-      <div class="look-scroll">
-        <h3><span>COLOR</span><i>色</i></h3>
-        <div class="swatches" id="sw-a"></div>
-        <div class="swatches small" id="sw-b"></div>
-        <h3><span>PATTERN</span><i>模様</i></h3>
-        <div class="chips" id="patterns"></div>
-        <h3><span>FINISH</span><i>質感</i></h3>
-        <div class="chips" id="finishes"></div>
-        <h3><span>EYES</span><i>目</i><input type="range" id="eye-size" min="0.6" max="1.8" step="0.01" value="1" /></h3>
-        <div class="chips" id="eyes"></div>
-        <h3><span>MOUTH</span><i>口</i></h3>
-        <div class="chips" id="mouths"></div>
-      </div>
       <div class="look-actions">
         <button class="btn small" id="btn-random">Random</button>
         <button class="btn small" id="btn-blank">Blank</button>

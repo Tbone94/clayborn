@@ -1,5 +1,7 @@
 // The Mold Lab: pick a body type, draw each part step by step (like Amazing Island),
-// watch it inflate into clay on the turntable.
+// watch it inflate into clay on the turntable. Three steps: SHAPE → PAINT → ADD-ONS.
+import * as THREE from 'three';
+import { ADDONS, ADDON_COLORS, MAX_ADDONS, loadAddonModels, makePiece, newAddon, restPointFromHit } from '../creature/addons.js';
 import { FRAMES, LAYERS, LAYER_COLORS, GHOSTS, OPTIONAL } from '../creature/frames.js';
 import { PAINT, paintShape, bump, w2p, encodeDesign, decodeDesign, newDesign } from '../creature/design.js';
 import { randomDesign, randomName } from '../creature/generator.js';
@@ -16,6 +18,7 @@ const MOUTHS = { smile: 'Smile', fangs: 'Fangs', o: 'Ooh', none: 'None' };
 const PATTERN_LABEL = { solid: 'Solid', spots: 'Spots', stripes: 'Stripes', patches: 'Patches', belly: 'Belly', speckle: 'Speckle', gradient: 'Fade', lava: 'Lava', stars: 'Stars' };
 const FINISH_LABEL = { clay: 'Clay', felt: 'Felt', vinyl: 'Vinyl toy', jelly: 'Jelly' };
 const STAT_COLORS = { speed: '#4fc3ff', power: '#ff5a3c', balance: '#ffd23f', glide: '#ff8fd0', swim: '#2fe0c0' };
+const SIZES = [6, 12, 22, 38];
 const TIPS = ['drag to spin · click to poke', 'close a loop and it fills in', 'longer legs = faster runner', 'wings let you glide over gaps', 'a big tail makes a strong swimmer', 'wide feet = hard to knock over', 'keys 1–7 switch parts · B/E/O tools'];
 
 export class Creator {
@@ -25,11 +28,17 @@ export class Creator {
     this.undo = []; this.redo = [];
     this.tintCache = {};
     this.canvas = $('paper'); this.ctx = this.canvas.getContext('2d');
+    this.phase = 'shape';
+    this.armed = null; this.sel = null; this.addonUndo = [];
+    this.ray = new THREE.Raycaster(); this.ndc = new THREE.Vector2();
     this.buildStatic();
     this.buildPicker();
+    this.buildAddonPane();
     this.bindPaper();
     this.bindKeys();
     new ResizeObserver(() => this.resizePaper()).observe($('paper').parentElement);
+    const ro = new ResizeObserver(() => this.layoutRegion());
+    ro.observe(document.querySelector('.paper-panel')); ro.observe(document.querySelector('.look-panel'));
   }
 
   // ---------- setup ----------
@@ -49,12 +58,21 @@ export class Creator {
     });
     document.querySelectorAll('.tool[data-tool]').forEach((b) => b.onclick = () => this.setTool(b.dataset.tool));
     document.querySelectorAll('#sizes .size').forEach((b) => b.onclick = () => this.setSize(+b.dataset.size));
-    $('btn-style').onclick = () => { sfx.tab(); document.querySelector('.look-panel').classList.toggle('open'); };
+    document.querySelectorAll('.phase-tab').forEach((b) => b.onclick = () => { sfx.tab(); this.setPhase(b.dataset.phase); });
+    document.querySelectorAll('[data-go]').forEach((b) => b.onclick = () => { sfx.tab(); this.setPhase(b.dataset.go); });
+    $('btn-size-m').onclick = () => this.setSize(SIZES[(SIZES.indexOf(this.size) + 1) % SIZES.length]);
+    $('btn-more').onclick = () => { sfx.click(); $('tools-extra').classList.toggle('open'); $('btn-more').classList.toggle('on'); };
+    $('btn-exit-m').onclick = () => { sfx.click(); this.app.exitCreator(); };
+    $('btn-done-2').onclick = () => this.app.finishCreator();
     $('btn-undo').onclick = () => this.doUndo();
     $('btn-redo').onclick = () => this.doRedo();
     $('btn-clear').onclick = () => this.clearParts([this.active]);
     $('btn-clear-all').onclick = () => { this.clearParts(LAYERS); this.app.toast('Wiped clean. Undo brings it back.'); this.goStep(0); };
-    $('step-next').onclick = () => this.goStep(this.step + 1);
+    $('step-next').onclick = () => {
+      if (this.step >= LAYERS.length) { sfx.tab(); this.setPhase('paint'); return; }
+      this.goStep(this.step + 1);
+      if (this.step >= LAYERS.length) { this.setPhase('paint'); this.app.toast('Shape done! Now paint it.'); }
+    };
     $('step-back').onclick = () => this.goStep(Math.max(0, this.step - 1));
     $('puff').oninput = (e) => { this.design.thick[this.active] = +e.target.value; $('puff-val').textContent = Math.round(e.target.value * 100) + '%'; this.rebuild(false, 120); };
 
@@ -85,9 +103,9 @@ export class Creator {
 
     $('name').oninput = (e) => { this.design.name = e.target.value || '???'; this.refreshSpecNo(); };
     $('btn-rename').onclick = () => { this.design.name = randomName(Math.random); $('name').value = this.design.name; this.refreshSpecNo(); sfx.pop(); babble(1.2, 3); };
-    $('btn-random').onclick = () => { sfx.sparkle(); this.load(randomDesign((Math.random() * 1e9) | 0)); this.goStep(LAYERS.length); };
+    $('btn-random').onclick = () => { sfx.sparkle(); this.load(randomDesign((Math.random() * 1e9) | 0)); this.goStep(LAYERS.length); this.setPhase('shape'); };
     $('btn-share').onclick = () => this.shareModal();
-    $('btn-blank').onclick = () => { sfx.squish(0.7); this.load(this.blankLike(this.design)); this.showPicker(true); };
+    $('btn-blank').onclick = () => { sfx.squish(0.7); this.load(this.blankLike(this.design)); this.setPhase('shape'); this.showPicker(true); };
     $('btn-guide').onclick = () => {
       this.pushUndo([this.active]);
       const x = this.design.layers[this.active].getContext('2d');
@@ -170,16 +188,51 @@ export class Creator {
     this.resizePaper();
     this.updateStats();
     this.app.studio.popIn();
-    document.querySelector('.look-panel').classList.remove('open');
+    if (!design.addons) design.addons = [];
+    this.armed = null; this.sel = null; this.addonUndo = [];
+    $('tools-extra').classList.remove('open'); $('btn-more').classList.remove('on');
+    this.setPhase('shape', true);
     if (fresh) { this.step = 0; this.showPicker(true); }
     else { this.showPicker(false); this.goStep(LAYERS.length); }
+    requestAnimationFrame(() => this.layoutRegion(true));
+  }
+
+  // ---------- the three steps ----------
+  setPhase(ph, silent) {
+    if (ph === 'addons' && this.isBlank()) { this.app.toast('Draw a body first!'); sfx.bonk(); ph = 'shape'; }
+    this.phase = ph;
+    $('creator').dataset.phase = ph;
+    document.querySelectorAll('.phase-tab').forEach((b) => b.classList.toggle('on', b.dataset.phase === ph));
+    document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('hidden', p.dataset.pane !== ph));
+    this.app.studio.autoSpin = ph !== 'addons';
+    if (this.creature) this.creature.frozen = ph === 'addons';
+    if (ph !== 'addons') { this.arm(null); this.select(null); }
+    else { this.makeAddonThumbs(); this.refreshAddonUI(); }
+    if (ph === 'shape') this.resizePaper();
+    $('center-tip-txt').textContent = ph === 'addons' ? 'tap a piece, then tap your monster' : 'drag to spin · click to poke';
+    if (!silent) this.layoutRegion();
+  }
+
+  // frame the turntable in whatever space the panels leave free
+  layoutRegion(instant) {
+    if (this.app.mode !== 'creator' && !instant) return;
+    const W = window.innerWidth, H = window.innerHeight;
+    const pp = document.querySelector('.paper-panel').getBoundingClientRect();
+    const lp = document.querySelector('.look-panel').getBoundingClientRect();
+    if (!pp.width) return;
+    const stacked = pp.width > W * 0.7; // phone: name bar on top, sheet at the bottom
+    const r = stacked ? { x0: 0, y0: lp.bottom + 4, x1: W, y1: pp.top - 4 } : { x0: pp.right, y0: 0, x1: lp.left, y1: H };
+    this.app.studio.setRegion(r, instant);
   }
 
   load(design) {
     this.design = design;
+    if (!design.addons) design.addons = [];
+    this.sel = null; this.addonUndo = [];
     this.undo = []; this.redo = [];
     this.creature.material.dispose();
     this.creature = this.app.makeCreature(design);
+    this.creature.frozen = this.phase === 'addons';
     this.app.studio.setCreature(this.creature);
     this.refreshAll();
     this.updateStats();
@@ -193,8 +246,8 @@ export class Creator {
     $('step-next').classList.remove('hidden'); $('step-back').classList.remove('hidden');
     if (i >= LAYERS.length) {
       $('step-no').textContent = 'DONE';
-      $('step-txt').innerHTML = 'Looking good!<small>Color it on the right, then hit BRING TO LIFE. Click any part tab to keep editing.</small>';
-      $('step-next').classList.add('hidden');
+      $('step-txt').innerHTML = 'Shape done!<small>Next, paint it. Tap any part tab to keep drawing.</small>';
+      const nx = $('step-next'); nx.textContent = 'Paint ▶'; nx.classList.add('primary'); nx.classList.remove('pulse');
       $('step-back').textContent = 'Back';
       $('btn-done').classList.add('pulse');
       return;
@@ -265,12 +318,17 @@ export class Creator {
     this.drawPaper();
   }
   setTool(t) { this.tool = t; document.querySelectorAll('.tool[data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === t)); sfx.click(); }
-  setSize(s) { this.size = s; document.querySelectorAll('#sizes .size').forEach((b) => b.classList.toggle('on', +b.dataset.size === s)); sfx.click(); }
+  setSize(s) {
+    this.size = s; document.querySelectorAll('#sizes .size').forEach((b) => b.classList.toggle('on', +b.dataset.size === s));
+    $('size-dot').style.setProperty('--s', [4, 8, 13, 19][SIZES.indexOf(s)] + 'px');
+    sfx.click();
+  }
 
   lookChanged(face) {
     const d = this.design;
     this.creature.setLook(d);
     if (face) this.creature.rebuildFace(d);
+    this.creature.rebuildAddons(d); this.markSelected();
     this.refreshAll();
   }
 
@@ -290,6 +348,8 @@ export class Creator {
       const t0 = performance.now();
       this.creature.build(this.design, detail);
       this.lastBuildMs = performance.now() - t0;
+      this.creature.frozen = this.phase === 'addons';
+      this.markSelected();
       this.updateStats();
       this.refreshTabs();
       this.drawPaper();
@@ -540,7 +600,13 @@ export class Creator {
       if (this.app.mode !== 'creator' || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       const k = e.key.toLowerCase();
       if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? this.doRedo() : this.doUndo(); return; }
-      if (k === 'b') this.setTool('brush');
+      if (this.phase === 'addons') {
+      if ((k === 'delete' || k === 'backspace') && this.sel != null) { e.preventDefault(); this.removeAddon(this.sel); }
+      if (k === 'escape') { this.arm(null); this.select(null); }
+      return;
+    }
+    if (this.phase !== 'shape') return;
+    if (k === 'b') this.setTool('brush');
       if (k === 'e') this.setTool('eraser');
       if (k === 'o') this.setTool('oval');
       if (k >= '1' && k <= '7') this.setActive(LAYERS[+k - 1]);
@@ -548,6 +614,211 @@ export class Creator {
       if (k === '[') this.setSize([6, 12, 22, 38][Math.max(0, [6, 12, 22, 38].indexOf(this.size) - 1)]);
       if (k === ']') this.setSize([6, 12, 22, 38][Math.min(3, [6, 12, 22, 38].indexOf(this.size) + 1)]);
     });
+  }
+
+  // ---------- add-ons: stick physical pieces on, like Amazing Island ----------
+  buildAddonPane() {
+    const grid = $('addon-grid');
+    for (const [type, def] of Object.entries(ADDONS)) {
+      const b = document.createElement('button'); b.className = 'addon-tile'; b.dataset.type = type; b.title = def.label;
+      const cv = document.createElement('canvas'); cv.width = cv.height = 96;
+      b.append(cv); b.insertAdjacentHTML('beforeend', `<span>${def.label}</span>`);
+      b.onclick = () => { sfx.pop(1.2); this.arm(this.armed === type ? null : type); };
+      grid.appendChild(b);
+    }
+    const cols = $('ae-colors');
+    for (const [c, label] of ADDON_COLORS) {
+      const b = document.createElement('button'); b.className = 'sw' + (c === 'auto' ? ' auto' : ''); b.dataset.c = c; b.title = label;
+      if (c !== 'auto') b.style.setProperty('--c', c === 'body' ? 'var(--body)' : c === 'accent' ? 'var(--accent)' : c);
+      b.onclick = () => this.editSel((a) => { a.color = c; }, true);
+      cols.appendChild(b);
+    }
+    const slider = (id, key, scaleByDef) => {
+      $(id).addEventListener('pointerdown', () => this.pushAddonUndo());
+      $(id).oninput = (e) => this.editSel((a) => { a[key] = scaleByDef ? ADDONS[a.type].size * +e.target.value : +e.target.value; });
+    };
+    slider('ae-size', 's', true); slider('ae-turn', 'turn'); slider('ae-tilt', 'tilt');
+    $('ae-mirror').onclick = () => {
+      const a = this.design.addons[this.sel]; if (!a) return;
+      if (Math.abs(a.p[2]) < 0.04) { this.app.toast("It's right in the middle!"); sfx.bonk(); return; }
+      this.editSel((x) => { x.mirror = !x.mirror; }, true);
+    };
+    $('ae-delete').onclick = () => this.removeAddon(this.sel);
+    $('ae-done').onclick = () => { sfx.click(); this.select(null); };
+    $('addon-undo').onclick = () => this.undoAddon();
+    $('addon-clear').onclick = () => {
+      if (!this.design.addons.length) return;
+      this.pushAddonUndo(); this.design.addons = []; this.select(null); this.applyAddons(); sfx.squish(0.6);
+      this.app.toast('All pieces off. Undo puts them back.');
+    };
+  }
+
+  arm(type) {
+    this.armed = type;
+    if (type) this.select(null);
+    document.querySelectorAll('.addon-tile').forEach((t) => t.classList.toggle('armed', t.dataset.type === type));
+    this.refreshAddonUI();
+  }
+
+  select(i) {
+    this.sel = i;
+    this.markSelected();
+    this.refreshAddonUI();
+  }
+
+  refreshAddonUI() {
+    const a = this.sel != null ? this.design?.addons[this.sel] : null;
+    $('addon-edit').classList.toggle('hidden', !a);
+    $('addon-grid').classList.toggle('hidden', !!a && window.innerWidth <= 900);
+    const n = this.design?.addons.length || 0;
+    $('addon-hint').textContent = a ? 'Drag it around on your monster, or tweak it below.'
+      : this.armed ? `Now tap your monster to stick on the ${ADDONS[this.armed].label.toLowerCase()}.`
+      : n ? `${n} piece${n === 1 ? '' : 's'} on. Tap one to change it, or pick another.` : 'Pick a piece, then tap your monster to stick it on.';
+    if (!a) return;
+    $('ae-name').textContent = ADDONS[a.type].label;
+    $('ae-size').value = a.s / ADDONS[a.type].size; $('ae-turn').value = a.turn; $('ae-tilt').value = a.tilt;
+    $('ae-mirror').classList.toggle('on', !!a.mirror);
+    const ae = $('addon-edit'); ae.style.setProperty('--body', this.design.color); ae.style.setProperty('--accent', this.design.color2);
+    $('ae-colors').classList.toggle('hidden', !!ADDONS[a.type].model);
+    document.querySelectorAll('#ae-colors .sw').forEach((b) => b.classList.toggle('on', b.dataset.c === (a.color || 'auto')));
+  }
+
+  // a yellow ring under the selected piece
+  markSelected() {
+    const c = this.creature;
+    if (!c) return;
+    if (!this.selRing) {
+      this.selRing = new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.06, 8, 32), new THREE.MeshBasicMaterial({ color: 0xffd23f, depthTest: false, transparent: true }));
+      this.selRing.rotation.x = Math.PI / 2; this.selRing.renderOrder = 999;
+    }
+    this.selRing.parent?.remove(this.selRing);
+    if (this.sel == null) return;
+    const o = c.addonObjs?.find((e) => e.index === this.sel && e.side === 1);
+    if (o) o.obj.add(this.selRing);
+  }
+
+  applyAddons() { this.creature.rebuildAddons(this.design); this.markSelected(); this.refreshAddonUI(); }
+
+  editSel(fn, snap) {
+    const a = this.design.addons[this.sel]; if (!a) return;
+    if (snap) { this.pushAddonUndo(); sfx.click(); }
+    fn(a); this.applyAddons();
+  }
+
+  removeAddon(i) {
+    if (i == null || !this.design.addons[i]) return;
+    this.pushAddonUndo();
+    this.design.addons.splice(i, 1);
+    sfx.squish(0.8);
+    this.select(null); this.applyAddons();
+  }
+
+  pushAddonUndo() {
+    this.addonUndo.push(JSON.stringify(this.design.addons));
+    if (this.addonUndo.length > 40) this.addonUndo.shift();
+  }
+  undoAddon() {
+    const u = this.addonUndo.pop();
+    if (u == null) { sfx.bonk(); return; }
+    this.design.addons = JSON.parse(u);
+    this.select(null); this.applyAddons(); sfx.squish(1.3);
+  }
+
+  // pointer on the 3D view, while on the add-ons step; returns true if it used the event
+  hitTest(e) {
+    const c = this.creature, cam = this.app.studio.camera;
+    this.ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+    this.ray.setFromCamera(this.ndc, cam);
+    const objs = (c.addonObjs || []).map((o) => o.obj);
+    const ph = objs.length ? this.ray.intersectObjects(objs, true)[0] : null;
+    const bh = c.proxy ? this.ray.intersectObject(c.proxy, false)[0] : null;
+    if (ph && (!bh || ph.distance <= bh.distance + 0.02)) {
+      let o = ph.object; while (o && !c.addonObjs.some((e) => e.obj === o)) o = o.parent;
+      const e2 = c.addonObjs.find((e) => e.obj === o);
+      if (e2) return { piece: e2.index, side: e2.side };
+    }
+    return bh ? { body: bh } : null;
+  }
+
+  canvasDown(e) {
+    if (this.phase !== 'addons' || !this.creature?.mesh) return false;
+    const h = this.hitTest(e);
+    if (!h) return false;
+    if (h.piece != null) {
+      this.pushAddonUndo();
+      this.select(h.piece); this.drag = { side: h.side, moved: false }; sfx.pop(1.4);
+      return true;
+    }
+    if (this.armed) {
+      if (this.design.addons.length >= MAX_ADDONS) { this.app.toast(`That's plenty of pieces (${MAX_ADDONS} max)!`); sfx.bonk(); return true; }
+      const { p, n } = restPointFromHit(this.creature.proxy, h.body);
+      this.pushAddonUndo();
+      this.design.addons.push(newAddon(this.armed, p, n));
+      sfx.pop(0.9); babble(1.4, 2, 1);
+      this.arm(null);
+      this.select(this.design.addons.length - 1);
+      this.applyAddons();
+      this.drag = { side: 1, moved: false };
+      return true;
+    }
+    if (this.sel != null) { this.select(null); }
+    return false;
+  }
+
+  canvasMove(e) {
+    if (!this.drag || this.sel == null) return false;
+    const h = this.hitTest(e);
+    const a = this.design.addons[this.sel];
+    if (h?.body && a) {
+      const { p, n } = restPointFromHit(this.creature.proxy, h.body);
+      const s = this.drag.side;
+      a.p = [p[0], p[1], p[2] * s]; a.n = [n[0], n[1], n[2] * s];
+      if (Math.abs(a.p[2]) < 0.04) a.mirror = false;
+      this.drag.moved = true;
+      this.applyAddons();
+    }
+    return true;
+  }
+
+  canvasUp() {
+    if (!this.drag) return false;
+    this.drag = null;
+    return true;
+  }
+
+  // little rendered portraits of every piece for the palette
+  async makeAddonThumbs() {
+    if (this.thumbsDone) return;
+    this.thumbsDone = true;
+    await loadAddonModels();
+    const r = this.app.gfx.renderer, dpr = r.getPixelRatio(), S = 96;
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#fbf8f0');
+    scene.environment = this.app.gfx.envMap; scene.environmentIntensity = 0.5;
+    scene.add(new THREE.HemisphereLight('#fff1dc', '#5a5070', 1.4));
+    const key = new THREE.DirectionalLight('#ffffff', 2.2); key.position.set(2, 4, 3); scene.add(key);
+    const cam = new THREE.PerspectiveCamera(28, 1, 0.01, 50);
+    const look = { color: '#ef7d57', color2: '#ffd36e', finish: 'clay' };
+    const box = new THREE.Box3(), ctr = new THREE.Vector3(), sz = new THREE.Vector3();
+    const prevTarget = r.getRenderTarget(), prevVp = new THREE.Vector4(); r.getViewport(prevVp);
+    const prevAuto = r.autoClear; r.autoClear = true;
+    r.setRenderTarget(null);
+    for (const tile of document.querySelectorAll('.addon-tile')) {
+      const obj = makePiece({ type: tile.dataset.type, color: 'auto' }, look);
+      if (!obj) continue;
+      scene.add(obj); obj.updateMatrixWorld(true);
+      box.setFromObject(obj); box.getCenter(ctr); box.getSize(sz);
+      const d = Math.max(sz.x, sz.y, sz.z) * 2.4;
+      cam.position.copy(ctr).add(new THREE.Vector3(0.75, 0.5, 1).normalize().multiplyScalar(d));
+      cam.lookAt(ctr); cam.updateProjectionMatrix();
+      r.setScissorTest(true); r.setScissor(0, 0, S, S); r.setViewport(0, 0, S, S);
+      r.render(scene, cam);
+      const ctx = tile.querySelector('canvas').getContext('2d');
+      const cv = r.domElement;
+      ctx.drawImage(cv, 0, cv.height - S * dpr, S * dpr, S * dpr, 0, 0, 96, 96);
+      scene.remove(obj);
+    }
+    r.setScissorTest(false); r.setViewport(prevVp); r.setRenderTarget(prevTarget); r.autoClear = prevAuto;
   }
 
   // ---------- sharing ----------

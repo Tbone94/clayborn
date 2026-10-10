@@ -1,6 +1,7 @@
 // Plasticine / felt / vinyl / jelly material with procedural patterns painted in
 // rest-pose object space, so spots and stripes stick to the body as it moves.
 import * as THREE from 'three';
+import { QUALITY as Q } from './quality.js';
 
 // Gloom zones shared by every gloom-aware material: (x, z, radius, strength)
 export const GLOOM = { value: [0, 1, 2, 3].map(() => new THREE.Vector4(0, 0, 0, 0)) };
@@ -42,8 +43,13 @@ varying vec3 vRestPos; varying vec3 vRestNormal;
 ${NOISE_GLSL}
 #ifdef USE_GLOOM
 uniform vec4 uZones[4]; varying vec3 vGWorld;
-float gloomAt(vec3 w){ float g = 0.0; for(int i=0;i<4;i++){ vec4 z = uZones[i]; if(z.z <= 0.0) continue;
-  float d = length(w.xz - z.xy); g = max(g, z.w * (1.0 - smoothstep(z.z*0.55, z.z, d + (vnoise(w*0.35)-0.5)*3.0))); } return g; }
+float gloomAt(vec3 w){
+  bool near = false; // noise wobble is at most ±2.7: far from every zone the result is exactly 0
+  for(int i=0;i<4;i++){ vec4 z = uZones[i]; if(z.z > 0.0 && z.w > 0.0 && length(w.xz - z.xy) < z.z + 3.0) near = true; }
+  if(!near) return 0.0;
+  float o = (vnoise(w*0.35)-0.5)*3.0, g = 0.0;
+  for(int i=0;i<4;i++){ vec4 z = uZones[i]; if(z.z <= 0.0) continue;
+    float d = length(w.xz - z.xy); g = max(g, z.w * (1.0 - smoothstep(z.z*0.55, z.z, d + o))); } return g; }
 #endif
 float patMask(vec3 p, vec3 n, out float glow){
   glow = 0.0;
@@ -94,7 +100,8 @@ export function makeClayMaterial(opts = {}) {
   mat.userData.uniforms = uniforms;
   mat.defines = { ...(mat.defines || {}) };
   if (opts.gloom) { uniforms.uZones = GLOOM; mat.defines.USE_GLOOM = ''; }
-  if (opts.cheap) mat.defines.CLAY_CHEAP = '';
+  const cheap = opts.cheap || Q.clayCheap; // phones: 2 noise octaves instead of fbm + worley fingerprints
+  if (cheap) mat.defines.CLAY_CHEAP = '';
   if (opts.scale) uniforms.uScale = { value: opts.scale };
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
@@ -123,7 +130,7 @@ export function makeClayMaterial(opts = {}) {
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         totalEmissiveRadiance += patGlow * uColB * 1.3;`);
   };
-  mat.customProgramCacheKey = () => 'clay-v3' + (opts.gloom ? 'g' : '') + (opts.cheap ? 'c' : '') + (opts.scale || '');
+  mat.customProgramCacheKey = () => 'clay-v3' + (opts.gloom ? 'g' : '') + (cheap ? 'c' : '') + (opts.scale || '');
   applyFinish(mat, opts.finish || 'clay');
   return mat;
 }
@@ -152,6 +159,7 @@ export function applyFinish(mat, finish) {
     Object.assign(mat, { roughness: 0.12, sheen: 0, clearcoat: 1, clearcoatRoughness: 0.05, metalness: 0, thickness: 0.8, ior: 1.33, attenuationDistance: 0.6 });
     mat.attenuationColor = mat.attenuationColor || new THREE.Color();
     mat.attenuationColor.copy(u.uColA.value);
-    u.uBump.value = 0.001; u.uFuzz.value = 0; setTransmission(0.85);
+    // transmission re-renders the whole scene into an extra target every frame: too much for phones
+    u.uBump.value = 0.001; u.uFuzz.value = 0; setTransmission(Q.jelly ? 0.85 : 0);
   }
 }

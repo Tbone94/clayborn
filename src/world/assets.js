@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { QUALITY as Q } from '../fx/quality.js';
 
 const BASE = import.meta.env.BASE_URL + 'assets/';
 export const A = { tex: {}, models: {}, sky: null, sunDir: new THREE.Vector3(0.5, 0.7, 0.3).normalize(), horizon: new THREE.Color('#cfe3f2') };
@@ -14,7 +15,7 @@ export async function loadAssets(renderer, onProgress = () => {}) {
   const tl = new THREE.TextureLoader();
   const draco = new DRACOLoader().setDecoderPath(import.meta.env.BASE_URL + 'draco/');
   const gl = new GLTFLoader().setDRACOLoader(draco);
-  const aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  const aniso = Math.min(Q.aniso, renderer.capabilities.getMaxAnisotropy());
   const jobs = [];
   let done = 0;
   const track = (p) => p.then((v) => { done++; onProgress(done / jobs.length); return v; });
@@ -22,11 +23,14 @@ export async function loadAssets(renderer, onProgress = () => {}) {
   const tex = (url, srgb) => track(tl.loadAsync(url).then((t) => {
     t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = aniso;
     if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+    shrink(t);
     return t;
   }));
   for (const id of TEX) {
     jobs.push(tex(`${BASE}tex/${id}_diff.jpg`, true).then((t) => { (A.tex[id] ||= {}).map = t; }));
-    jobs.push(tex(`${BASE}tex/${id}_nor.jpg`, false).then((t) => { (A.tex[id] ||= {}).normal = t; }));
+    // phones skip the PBR normal maps entirely (9 fewer ~1 MB downloads, far less GPU memory)
+    if (Q.normalMaps) jobs.push(tex(`${BASE}tex/${id}_nor.jpg`, false).then((t) => { (A.tex[id] ||= {}).normal = t; }));
+    else (A.tex[id] ||= {}).normal = null;
   }
   jobs.push(tex(`${BASE}tex/waternormals.jpg`, false).then((t) => { A.tex.water = t; }));
   jobs.push(tex(`${BASE}eztree/grass.jpg`, true).then((t) => { A.tex.lawn = t; }));
@@ -44,6 +48,19 @@ export async function loadAssets(renderer, onProgress = () => {}) {
   const pmrem = new THREE.PMREMGenerator(renderer);
   A.env = pmrem.fromEquirectangular(A.sky).texture;
   return A;
+}
+
+// Low tier: downscale big textures on the CPU before upload (a 1024² RGBA texture with
+// mips is ~5.6 MB of GPU memory; 512² is a quarter of that and samples faster on phones).
+function shrink(t) {
+  const img = t.image, S = Q.texSize;
+  if (!S || !img || !(img.width > S)) return;
+  try {
+    const c = document.createElement('canvas');
+    c.width = S; c.height = Math.max(1, Math.round(img.height * S / img.width));
+    const x = c.getContext('2d'); x.imageSmoothingQuality = 'high'; x.drawImage(img, 0, 0, c.width, c.height);
+    t.image = c; t.needsUpdate = true;
+  } catch { /* keep the full-size image */ }
 }
 
 // The brightest pixel in the HDRI is the sun: aim the shadow-casting light there.
