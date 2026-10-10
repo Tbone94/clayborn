@@ -52,7 +52,7 @@ export class Studio {
     }
 
     this.spin = 0.4; this.spinVel = 0; this.creature = null;
-    this.hop = 0; this.hopV = 0; this.walk = false;
+    this.hop = 0; this.hopV = 0; this.walk = false; this.squash = 0;
     this.ray = new THREE.Raycaster(); this.ndc = new THREE.Vector2();
     this.left = 0; this.right = 0;
   }

@@ -11,6 +11,7 @@ import { RaceEvent } from '../events/race.js';
 import { BonkEvent } from '../events/bonk.js';
 import { LeapEvent } from '../events/leap.js';
 import { islandH, ZONES } from '../scenes/island.js';
+import { newAddon, restPointFromHit, loadAddonModels } from '../creature/addons.js';
 
 const W = 1920, H = 1080, FPS = 30;
 const BAR = Math.round((H - W / 2.39) / 2); // 2.39:1 scope letterbox
@@ -23,7 +24,7 @@ const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const SP = { x: 0, z: 2 };
 
 export class Cinema extends Director {
-  async run({ from = 0, to = Infinity, dir = 'cinema', pick = null, ranges = null } = {}) {
+  async run({ from = 0, to = Infinity, dir = 'cinema', pick = null, ranges = null, makeover = false } = {}) {
     const picks = pick && new Set(pick.map((s) => Math.round(s * FPS)));
     const app = this.app, gfx = app.gfx;
     app.mode = 'trailer';
@@ -42,8 +43,9 @@ export class Cinema extends Director {
     this.ctx = this.overlay.getContext('2d');
     this.makeGrain();
     this.makeHero();
-    const shots = this.shots();
+    const shots = makeover ? this.makeoverShots() : this.shots();
     const total = Math.round(shots[shots.length - 1].t1 * FPS);
+    for (const sh of shots) await sh.prepare?.();
     this.island = app.island;
     for (const z of app.island.zoneState) z.label.visible = false;
     app.island.easel.traverse((o) => { if (o.isSprite) o.visible = false; });
@@ -192,6 +194,102 @@ export class Cinema extends Director {
       }
     }
     x.restore();
+  }
+
+  // toy-box label that slams in, like the game's own UI ("+ CHICKEN FEET")
+  tag(x, text, lt, i) {
+    const a = ease(lt / 0.16);
+    if (a <= 0) return;
+    const y = H - BAR - 70 - i * 64, slide = (1 - a) * -380;
+    x.save(); x.globalAlpha = Math.min(1, a * 1.4);
+    x.font = '400 40px "Dela Gothic One"';
+    const w = x.measureText(text).width + 56;
+    x.translate(90 + slide, y); x.transform(1, 0, -0.2, 1, 0, 0);
+    x.fillStyle = RED; x.fillRect(8, 8, w, 54); x.fillStyle = INK; x.fillRect(0, 0, w, 54);
+    x.setTransform(1, 0, 0, 1, 0, 0);
+    x.fillStyle = YEL; x.textBaseline = 'middle'; x.fillText(text, 90 + slide + 22, y + 29);
+    x.restore();
+  }
+
+  // the makeover, rendered on its own and spliced in after "behold."
+  makeoverShots() {
+    const app = this.app, studio = app.studio, gfx = app.gfx, D = this;
+    const list = [];
+    const LOOKS = [
+      { color: '#9bc53d', color2: '#2a2d4c', pattern: 'stripes', finish: 'clay', label: 'PAINT: STRIPES' },
+      { color: '#ffd23f', color2: '#e63b2e', pattern: 'stars', finish: 'vinyl', label: 'PAINT: STARS' },
+      { color: '#4fb3e8', color2: '#fbf8f0', pattern: 'lava', finish: 'jelly', label: 'FINISH: JELLY' },
+      { color: '#7b4fe0', color2: '#ffd23f', pattern: 'spots', finish: 'felt', label: 'FINISH: FELT' },
+    ];
+    // where each piece lands: an anchor inside the body (rest space) + the direction to shoot in from
+    const PIECES = [
+      { type: 'horn', at: [0.3, 1.42, 0.1], dir: [-0.1, 0.75, 0.65], label: '+ HORNS' },
+      { type: 'eye', at: [0.05, 0.9, 0], dir: [1, 0.05, 0.25], label: '+ EXTRA EYE', s: 1.5 },
+      { type: 'beanie', at: [0.3, 1.4, 0], dir: [0, 1, 0], label: '+ PROPELLER HAT', s: 1.15 },
+      { type: 'handlebar', at: [0.32, 1.33, 0], dir: [1, -0.25, 0], label: '+ MUSTACHE', s: 1.2 },
+      { type: 'chickenfoot', at: [0.0, 0.8, 0], dir: [0.1, -0.2, 1], label: '+ CHICKEN FEET', s: 1.25 },
+      { type: 'pixelshades', at: [0.3, 1.42, 0], dir: [1, 0.12, 0], label: '+ SHADES', s: 1.1 },
+    ];
+    const t0 = 0.35, swap = 0.42, pieceAt = t0 + LOOKS.length * swap + 0.25, gap = 0.42;
+    const dur = pieceAt + PIECES.length * gap + 1.7;
+    list.push({
+      t0: 0, t1: dur, tint: false, grade: 'contrast(1.06)',
+      title: { text: 'EVERY HERO NEEDS A LOOK', at: 0.1, until: pieceAt - 0.1, y: BAR + 110 },
+      subs: [{ text: 'this is the look', at: dur - 1.35 }],
+      async prepare() { await loadAddonModels(); },
+      enter() {
+        gfx.setLook({ blur: 0, vignette: 0.4, bloom: 0.25, world: false });
+        const d = D.heroDesign;
+        for (const st of HERO_STROKES) { D.paintStroke(st, 1); if (st.loop) D.fillLoop(st); }
+        d.addons = [];
+        D.hero.build(d, 64);
+        studio.setCreature(D.hero); studio.spinVel = 0; studio.spin = -1.05; studio.camDist = undefined;
+        studio.camera.clearViewOffset(); studio.camera.zoom = 1; studio.region = null; studio.view = null;
+        studio.camera.aspect = W / H; studio.camera.updateProjectionMatrix();
+        studio.lookAt.y = 0.32 + (D.hero.height || 1.2) * 0.5;
+        studio.update(0.016, 0); D.hero.group.updateMatrixWorld(true);
+        // aim every piece now, while the pose is known
+        const proxy = D.hero.proxy, ray = new THREE.Raycaster();
+        this.pieces = PIECES.map((pc) => {
+          const dir = new THREE.Vector3(...pc.dir).normalize();
+          const at = proxy.localToWorld(new THREE.Vector3(...pc.at));
+          const dw = dir.clone().transformDirection(proxy.matrixWorld);
+          ray.set(at.clone().addScaledVector(dw, 3), dw.clone().negate());
+          const hit = ray.intersectObject(proxy, false)[0];
+          if (!hit) return null;
+          const { p, n } = restPointFromHit(proxy, hit);
+          const a = newAddon(pc.type, p, n); a.s *= pc.s || 1;
+          return { a, label: pc.label };
+        });
+        this.looks = 0; this.added = 0; this.tags = [];
+      },
+      update(dt, lt) {
+        const d = D.heroDesign;
+        if (this.looks < LOOKS.length && lt >= t0 + this.looks * swap) {
+          const L = LOOKS[this.looks++];
+          Object.assign(d, { color: L.color, color2: L.color2, pattern: L.pattern, finish: L.finish });
+          D.hero.setLook(d); D.hero.rebuildFace(d); studio.popIn();
+          this.tags = [{ text: L.label, t: lt }];
+          D.cue('swap', lt);
+        }
+        if (this.added < this.pieces.length && lt >= pieceAt + this.added * gap) {
+          const pc = this.pieces[this.added++];
+          if (pc) {
+            d.addons.push(pc.a); D.hero.rebuildAddons(d); studio.popIn(); D.hero.motion.land = 0.6;
+            this.tags = [...this.tags.filter((g) => !g.text.startsWith('PAINT') && !g.text.startsWith('FINISH')), { text: pc.label, t: lt }].slice(-3);
+            D.cue('pop', lt); if (this.added % 2) D.cue('babble', lt + 0.05);
+          }
+        }
+        if (lt > dur - 1.5 && !this.hopped) { this.hopped = true; studio.hopV = 3.2; D.hero.motion.land = 1; D.cue('boing', lt); }
+        studio.spin = -1.05 + lt * 0.09 - dt * 0.25; studio.spinVel = 0;
+        studio.update(dt, lt);
+        const c = studio.camera, ly = studio.lookAt.y;
+        c.position.set(0.35, ly + 0.45, 5.3); c.lookAt(0.05, ly + 0.2, 0);
+      },
+      overlay(x, lt) { (this.tags || []).forEach((g, i, arr) => { if (lt < dur - 1.45) D.tag(x, g.text, lt - g.t, arr.length - 1 - i); }); },
+      scene: () => studio.scene, camera: () => studio.camera,
+    });
+    return list;
   }
 
   // ---------- the cut ----------
