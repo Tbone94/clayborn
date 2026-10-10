@@ -16,8 +16,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=DotGothic16&family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap" rel="stylesheet" />
-  <script type="module" crossorigin src="./assets/index-Tvdt5D5r.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-BE-lVrM1.css">
+  <script type="module" crossorigin src="./assets/index-BqVFuDcF.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-ChxSApPX.css">
 </head>
 <body>
   <canvas id="gl"></canvas>
@@ -98,12 +98,14 @@
           <div class="tool-group">
             <button class="tool" id="btn-undo" title="Undo (Ctrl+Z)"><b>↺</b><small>UNDO</small></button>
             <button class="tool" id="btn-redo" title="Redo (Ctrl+Shift+Z)"><b>↻</b><small>REDO</small></button>
+            <button class="tool curse" id="btn-curse" title="Curse it: randomly mutate your monster (Undo takes it back)"><b>呪</b><small>CURSE</small></button>
           </div>
           <button class="tool mobile-only" id="btn-more" title="More tools"><b>⋯</b><small>MORE</small></button>
           <div class="tools-extra" id="tools-extra">
             <div class="tool-group">
               <button class="tool" id="btn-clear" title="Clear the selected part"><b>✕</b><small>PART</small></button>
               <button class="tool danger" id="btn-clear-all" title="Wipe every part and start over"><b>✕</b><small>ALL</small></button>
+              <button class="tool" id="btn-sym" title="Mirror drawing (M): whatever you draw on one side appears on the other"><b>⇆</b><small>MIRROR</small></button>
             </div>
             <label class="slider-row" title="How puffy the selected part is"><span>CHUB</span><input type="range" id="puff" min="0.35" max="1.9" step="0.01" value="1" /><b id="puff-val">100%</b></label>
           </div>
@@ -124,6 +126,8 @@
           <div class="chips" id="eyes"></div>
           <h3><span>MOUTH</span><i>口</i></h3>
           <div class="chips" id="mouths"></div>
+          <h3><span>VOICE</span><i>声</i><em>tap to hear it</em></h3>
+          <div class="chips" id="voices"></div>
         </div>
         <div class="pane-next"><button class="btn small" data-go="shape">◀ Shape</button><button class="btn primary" data-go="addons">Next: Add-ons ▶</button></div>
       </div>
@@ -159,9 +163,11 @@
         <button class="btn small" id="btn-random">Random</button>
         <button class="btn small" id="btn-blank">Blank</button>
         <button class="btn small" id="btn-share">Share</button>
+        <button class="btn small" id="btn-card">Card</button>
       </div>
       <button class="btn big primary" id="btn-done"><span>BRING TO LIFE</span><small>出撃</small></button>
     </div>
+    <div class="birth-stamp hidden" id="birth-stamp"><b>誕生</b><span id="birth-name">IT'S ALIVE!</span></div>
     <div class="center-tip" id="center-tip"><span id="center-tip-txt">drag to spin · click to poke</span></div>
   </section>
 
@@ -171,6 +177,7 @@
       <div class="orbs" id="orbs"></div>
       <div class="hud-buttons">
         <button class="btn small" id="btn-edit">Edit monster</button>
+        <button class="btn small" id="btn-hud-card">Card</button>
         <button class="btn small" id="btn-new">+ New monster</button>
         <button class="btn small" id="btn-mute">SND ON</button>
       </div>
