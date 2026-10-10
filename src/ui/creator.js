@@ -1,14 +1,14 @@
 // The Mold Lab: pick a body type, draw each part step by step (like Amazing Island),
 // watch it inflate into clay on the turntable. Three steps: SHAPE → PAINT → ADD-ONS.
 import * as THREE from 'three';
-import { ADDONS, ADDON_COLORS, MAX_ADDONS, loadAddonModels, makePiece, newAddon, restPointFromHit } from '../creature/addons.js';
+import { ADDONS, ADDON_SECTIONS, ADDON_COLORS, MAX_ADDONS, loadAddonModels, makePiece, newAddon, restPointFromHit } from '../creature/addons.js';
 import { FRAMES, LAYERS, LAYER_COLORS, GHOSTS, OPTIONAL } from '../creature/frames.js';
 import { PAINT, paintShape, bump, w2p, encodeDesign, decodeDesign, newDesign } from '../creature/design.js';
 import { randomDesign, randomName } from '../creature/generator.js';
 import { STAT_INFO } from '../creature/stats.js';
 import { curse } from '../creature/mutate.js';
 import { PATTERNS, FINISHES } from '../fx/clay.js';
-import { sfx, babble } from '../fx/audio.js';
+import { sfx, babble, VOICES } from '../fx/audio.js';
 
 const $ = (id) => document.getElementById(id);
 const INK = '#15172b';
@@ -100,13 +100,19 @@ export class Creator {
     chipRow($('finishes'), Object.fromEntries(FINISHES.map((p) => [p, FINISH_LABEL[p]])), 'finish', false);
     chipRow($('eyes'), EYES, 'eyes', true);
     chipRow($('mouths'), MOUTHS, 'mouth', true);
+    for (const [v, label] of Object.entries(VOICES)) {
+      const b = document.createElement('button'); b.className = 'chip'; b.dataset.v = v; b.textContent = label;
+      b.onclick = () => { this.design.voice = v; this.speak(); this.refreshAll(); };
+      $('voices').appendChild(b);
+    }
     $('eye-size').oninput = (e) => { this.design.eyeSize = +e.target.value; clearTimeout(this.faceT); this.faceT = setTimeout(() => this.creature.rebuildFace(this.design), 60); };
 
     $('name').oninput = (e) => { this.design.name = e.target.value || '???'; this.refreshSpecNo(); };
-    $('btn-rename').onclick = () => { this.design.name = randomName(Math.random); $('name').value = this.design.name; this.refreshSpecNo(); sfx.pop(); babble(1.2, 3); };
+    $('btn-rename').onclick = () => { this.design.name = randomName(Math.random); $('name').value = this.design.name; this.refreshSpecNo(); sfx.pop(); babble(1.2, 3, 0, this.design.voice); };
     $('btn-random').onclick = () => { sfx.sparkle(); this.showPicker(false); this.load(randomDesign((Math.random() * 1e9) | 0)); this.goStep(LAYERS.length); this.setPhase('shape'); };
     $('btn-share').onclick = () => this.shareModal();
     $('btn-curse').onclick = () => this.doCurse();
+    $('btn-sym').onclick = () => this.toggleSym();
     $('btn-card').onclick = () => { sfx.click(); this.app.cardModal(this.creature); };
     $('btn-blank').onclick = () => { sfx.squish(0.7); this.load(this.blankLike(this.design)); this.setPhase('shape'); this.showPicker(true); };
     $('btn-guide').onclick = () => {
@@ -166,7 +172,7 @@ export class Creator {
 
   showPicker(on) {
     $('frame-picker').classList.toggle('hidden', !on);
-    document.querySelectorAll('.fp-card').forEach((c) => c.classList.toggle('on', c.dataset.frame === this.design.frame));
+    document.querySelectorAll('.fp-card').forEach((c) => c.classList.toggle('on', c.dataset.frame === this.design?.frame));
     if (on) { $('step-no').textContent = 'STEP 0'; $('step-txt').innerHTML = 'Pick a body type<small>Click one of the cards on the paper.</small>'; $('step-next').classList.add('hidden'); $('step-back').classList.add('hidden'); }
   }
 
@@ -240,7 +246,7 @@ export class Creator {
     this.refreshAll();
     this.updateStats();
     this.app.studio.popIn();
-    babble(1.2, 4);
+    babble(1.2, 4, 0, design.voice);
   }
 
   // ---------- guided steps ----------
@@ -285,7 +291,7 @@ export class Creator {
     this.refreshSpecNo();
     const mark = (sel, v) => document.querySelectorAll(sel).forEach((b) => b.classList.toggle('on', (b.dataset.v ?? b.dataset.c) === v));
     mark('#sw-a .sw', d.color); mark('#sw-b .sw', d.color2);
-    mark('#patterns .chip', d.pattern); mark('#finishes .chip', d.finish); mark('#eyes .chip', d.eyes); mark('#mouths .chip', d.mouth);
+    mark('#patterns .chip', d.pattern); mark('#finishes .chip', d.finish); mark('#eyes .chip', d.eyes); mark('#mouths .chip', d.mouth); mark('#voices .chip', d.voice || 'chirpy');
     $('eye-size').value = d.eyeSize;
     this.setActive(this.active, true);
     this.drawPaper();
@@ -325,6 +331,13 @@ export class Creator {
     this.size = s; document.querySelectorAll('#sizes .size').forEach((b) => b.classList.toggle('on', +b.dataset.size === s));
     $('size-dot').style.setProperty('--s', [4, 8, 13, 19][SIZES.indexOf(s)] + 'px');
     sfx.click();
+  }
+
+  // the monster says something in its own voice, with a little hop
+  speak() {
+    const c = this.creature, st = this.app.studio;
+    st.hopV = 2.4; if (c) c.motion.land = 1;
+    babble(1.35 / Math.pow(Math.max(0.4, c?.stats.raw?.mass || 1), 0.3), 4, 1, this.design.voice);
   }
 
   lookChanged(face) {
@@ -437,6 +450,12 @@ export class Creator {
     ctx.font = '12px "DotGothic16", monospace'; ctx.fillStyle = 'rgba(21,23,43,.6)';
     ctx.fillText('GROUND', 28, gy - 6);
     ctx.fillText('FRONT ▶', sq - 70, 22);
+    if (this.sym) {
+      const mx = w2p(0, 0)[0] * S;
+      ctx.strokeStyle = 'rgba(230,59,46,.7)'; ctx.setLineDash([10, 6]); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(mx, 0); ctx.lineTo(mx, sq); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(230,59,46,.85)'; ctx.fillText('MIRROR', mx + 6, 38);
+    }
 
     const A = this.creature?.analysis;
     const empty = (id) => !A || !A.F || !A.F[id] || A.F[id].empty;
@@ -487,6 +506,10 @@ export class Creator {
       ctx.fillStyle = LAYER_COLORS[this.active]; ctx.globalAlpha = 0.5; ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
       ctx.beginPath(); ctx.ellipse((o.a[0] + o.b[0]) / 2 * S, (o.a[1] + o.b[1]) / 2 * S, Math.abs(o.b[0] - o.a[0]) / 2 * S, Math.abs(o.b[1] - o.a[1]) / 2 * S, 0, 0, Math.PI * 2);
       ctx.fill(); ctx.globalAlpha = 1; ctx.stroke(); ctx.setLineDash([]);
+      if (this.sym) {
+        const mx = this.mirrorX((o.a[0] + o.b[0]) / 2);
+        ctx.globalAlpha = 0.35; ctx.beginPath(); ctx.ellipse(mx * S, (o.a[1] + o.b[1]) / 2 * S, Math.abs(o.b[0] - o.a[0]) / 2 * S, Math.abs(o.b[1] - o.a[1]) / 2 * S, 0, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+      }
     }
     ctx.restore();
     $('paper-empty').classList.toggle('hidden', !(!A || A.empty) || !!this.stroke || !!this.oval);
@@ -545,6 +568,7 @@ export class Creator {
         if (rx > 3 && ry > 3) {
           const x = this.design.layers[this.active].getContext('2d');
           x.fillStyle = '#000'; x.beginPath(); x.ellipse((o.a[0] + o.b[0]) / 2, (o.a[1] + o.b[1]) / 2, rx, ry, 0, 0, Math.PI * 2); x.fill();
+          if (this.sym) { x.beginPath(); x.ellipse(this.mirrorX((o.a[0] + o.b[0]) / 2), (o.a[1] + o.b[1]) / 2, rx, ry, 0, 0, Math.PI * 2); x.fill(); }
           sfx.pop(0.9);
         } else this.undo.pop();
         bump(this.design, this.active); this.redo = []; this.changed();
@@ -558,7 +582,9 @@ export class Creator {
         const x = this.design.layers[this.active].getContext('2d');
         x.save(); x.fillStyle = '#000'; x.beginPath();
         p.forEach(([a, b], i) => i ? x.lineTo(a, b) : x.moveTo(a, b));
-        x.closePath(); x.fill(); x.restore();
+        x.closePath(); x.fill();
+        if (this.sym) { const m = this.mirrorX; x.beginPath(); p.forEach(([a, b], i) => i ? x.lineTo(m(a), b) : x.moveTo(m(a), b)); x.closePath(); x.fill(); }
+        x.restore();
         sfx.pop(0.9);
       }
       bump(this.design, this.active);
@@ -577,8 +603,18 @@ export class Creator {
     x.globalCompositeOperation = this.tool === 'eraser' ? 'destination-out' : 'source-over';
     x.strokeStyle = '#000'; x.lineWidth = this.tool === 'eraser' ? w * 1.5 : w; x.lineCap = 'round'; x.lineJoin = 'round';
     x.beginPath(); x.moveTo(a[0], a[1]); x.lineTo(b[0] + 0.01, b[1]); x.stroke();
+    if (this.sym) { const m = this.mirrorX; x.beginPath(); x.moveTo(m(a[0]), a[1]); x.lineTo(m(b[0]) + 0.01, b[1]); x.stroke(); }
     x.restore();
     bump(this.design, this.active);
+  }
+
+  // mirror drawing: strokes, fills and ovals repeat across the middle line (world x = 0)
+  get mirrorX() { const ax = w2p(0, 0)[0]; return (px) => 2 * ax - px; }
+  toggleSym() {
+    this.sym = !this.sym; sfx.click();
+    $('btn-sym').classList.toggle('on', this.sym);
+    this.app.toast(this.sym ? 'Mirror on: draw one side, get both' : 'Mirror off');
+    this.drawPaper();
   }
 
   // undo entries can cover several parts (clear-all)
@@ -611,7 +647,7 @@ export class Creator {
     const names = curse(this.design);
     this.lookChanged(true);
     this.changed();
-    sfx.squish(0.5); setTimeout(() => sfx.boing(0.7), 120); babble(0.8, 4, 0);
+    sfx.squish(0.5); setTimeout(() => sfx.boing(0.7), 120); babble(0.8, 4, 0, this.design.voice);
     this.app.toast(`呪 CURSED: ${names.join(' + ')}`, 2600);
   }
   doUndo() { this.restore(this.undo, this.redo); }
@@ -631,6 +667,7 @@ export class Creator {
     if (k === 'b') this.setTool('brush');
       if (k === 'e') this.setTool('eraser');
       if (k === 'o') this.setTool('oval');
+      if (k === 'm') this.toggleSym();
       if (k >= '1' && k <= '7') this.setActive(LAYERS[+k - 1]);
       if (k === 'enter' && this.step < LAYERS.length) this.goStep(this.step + 1);
       if (k === '[') this.setSize([6, 12, 22, 38][Math.max(0, [6, 12, 22, 38].indexOf(this.size) - 1)]);
@@ -641,12 +678,18 @@ export class Creator {
   // ---------- add-ons: stick physical pieces on, like Amazing Island ----------
   buildAddonPane() {
     const grid = $('addon-grid');
-    for (const [type, def] of Object.entries(ADDONS)) {
-      const b = document.createElement('button'); b.className = 'addon-tile'; b.dataset.type = type; b.title = def.label;
-      const cv = document.createElement('canvas'); cv.width = cv.height = 96;
-      b.append(cv); b.insertAdjacentHTML('beforeend', `<span>${def.label}</span>`);
-      b.onclick = () => { sfx.pop(1.2); this.arm(this.armed === type ? null : type); };
-      grid.appendChild(b);
+    const listed = new Set(ADDON_SECTIONS.flatMap(([, , ids]) => ids || []));
+    for (const [title, jp, ids] of ADDON_SECTIONS) {
+      const types = (ids || Object.keys(ADDONS).filter((t) => !listed.has(t))).filter((t) => ADDONS[t]);
+      grid.insertAdjacentHTML('beforeend', `<h3 class="addon-sec"><span>${title}</span><i>${jp}</i></h3>`);
+      for (const type of types) {
+        const def = ADDONS[type];
+        const b = document.createElement('button'); b.className = 'addon-tile'; b.dataset.type = type; b.title = def.label;
+        const cv = document.createElement('canvas'); cv.width = cv.height = 96;
+        b.append(cv); b.insertAdjacentHTML('beforeend', `<span>${def.label}</span>`);
+        b.onclick = () => { sfx.pop(1.2); this.arm(this.armed === type ? null : type); };
+        grid.appendChild(b);
+      }
     }
     const cols = $('ae-colors');
     for (const [c, label] of ADDON_COLORS) {
@@ -776,7 +819,7 @@ export class Creator {
       const { p, n } = restPointFromHit(this.creature.proxy, h.body);
       this.pushAddonUndo();
       this.design.addons.push(newAddon(this.armed, p, n));
-      sfx.pop(0.9); babble(1.4, 2, 1);
+      sfx.pop(0.9); babble(1.4, 2, 1, this.design.voice);
       this.arm(null);
       this.select(this.design.addons.length - 1);
       this.applyAddons();

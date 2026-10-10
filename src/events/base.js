@@ -13,7 +13,9 @@ let attempt = 0;
 
 export class EventBase {
   constructor(app, island, creature, idx, { sky = ['#86c5e8', '#ffe0b8'], rivals = 3, rivalOpts = [] } = {}) {
+    // idx: a Gloom zone index (0-2), or a side-game spot object ({ id, name, jp, side: true })
     this.app = app; this.island = island; this.idx = idx;
+    this.spot = typeof idx === 'object' ? idx : null;
     const s = this.scene = new THREE.Scene();
     void sky;
     this.lights = setupWorld(s, { fog: [110, 380], shadowSize: 22 });
@@ -31,7 +33,8 @@ export class EventBase {
     attempt++;
     this.rivals = [];
     for (let i = 0; i < rivals; i++) {
-      const d = randomDesign((idx * 1000 + attempt * 37 + i * 7) * 2654435761 % 1e9, rivalOpts[i] || {});
+      const seed = this.spot ? [...this.spot.id].reduce((a, ch) => a + ch.charCodeAt(0), 0) : idx;
+      const d = randomDesign((seed * 1000 + attempt * 37 + i * 7) * 2654435761 % 1e9, rivalOpts[i] || {});
       const c = new Creature(d, { detail: 46 });
       const b = new Body(c); b.ai = { skill: 0.82 + Math.random() * 0.14, t: 0 };
       s.add(c.group); this.rivals.push(b);
@@ -61,7 +64,7 @@ export class EventBase {
     } else if (this.state === 'count') {
       const n = 3 - Math.floor(this.clock);
       if (n !== this.lastCount && n > 0) { this.lastCount = n; this.banner(String(n), 800); sfx.count(false); }
-      if (this.clock >= 3) { this.state = 'play'; this.clock = 0; this.banner('GO!', 700); sfx.count(true); babble(1.3, 2, 1); }
+      if (this.clock >= 3) { this.state = 'play'; this.clock = 0; this.banner('GO!', 700); sfx.count(true); babble(1.3, 2, 1, this.player.c.design.voice); }
       this.followCam(dt);
     } else if (this.state === 'play') {
       this.time += dt;
@@ -91,29 +94,37 @@ export class EventBase {
     return { mx: lockForward ? Math.max(0, I.moveY) : I.moveY, mz: I.moveX, jump: I.jump, jumpPressed: I.jumpPressed, dashPressed: I.dashPressed };
   }
 
-  finish(won, rows, advice) {
+  // result: { score: number (higher is better), text: how to show it } — used for records + the daily challenge
+  finish(won, rows, advice, result = {}) {
     if (this.state === 'done') return;
     this.state = 'done';
     const p = this.player.c;
-    if (won) { p.motion.celebrate = 1; sfx.fanfare(); this.banner('YOU WIN!', 0); babble(1.4, 6, 1); this.confetti(); }
+    if (won) { p.motion.celebrate = 1; sfx.fanfare(); this.banner('YOU WIN!', 0); babble(1.4, 6, 1, p.design.voice); this.confetti(); }
     else { sfx.sad(); this.banner('So close!', 1400); }
+    const out = { won, ...result };
+    const side = !!this.spot;
+    const rec = side && result.score != null ? this.island.noteRecord(this.spot.id, result.score, result.text) : null;
     setTimeout(() => {
       $('banner').classList.add('hidden');
       const list = rows.map((r) => `<div class="${r.me ? 'me' : ''}"><span><i>${r.place}</i>${escapeHtml(r.name)}</span><span>${r.score}</span></div>`).join('');
-      this.app.modal(`<h2>${won ? '<span class="jp">浄化</span>Gloom cleansed!' : '<span class="jp">再挑戦</span>Not this time'}</h2>
+      const head = side
+        ? (won ? '<span class="jp">優勝</span>You win!' : '<span class="jp">惜しい</span>So close!')
+        : (won ? '<span class="jp">浄化</span>Gloom cleansed!' : '<span class="jp">再挑戦</span>Not this time');
+      const recLine = rec ? `<p class="record">${rec.isNew ? '★ NEW RECORD' : 'Record'}: <b>${rec.best}</b></p>` : '';
+      const again = side || !won;
+      this.app.modal(`<h2>${head}</h2>
         <div class="results">${list}</div>
+        ${recLine}
         <p style="margin-top:14px">${advice}</p>
         <div class="row">
-          ${won ? '' : '<button class="btn primary" id="r-retry">Retry</button>'}
+          ${again ? `<button class="btn primary" id="r-retry">${side ? 'Play again' : 'Retry'}</button>` : ''}
           ${won ? '' : '<button class="btn yellow" id="r-edit">Redraw my monster</button>'}
-          <button class="btn ${won ? 'primary' : 'ghost'}" id="r-back">Back to island</button>
+          <button class="btn ${again ? 'ghost' : 'primary'}" id="r-back">Back to island</button>
         </div>`);
       const close = () => this.app.closeModal();
-      $('r-back').onclick = () => { close(); this.island.endEvent(won, this.idx); };
-      if (!won) {
-        $('r-retry').onclick = () => { close(); this.island.endEvent(false, this.idx); setTimeout(() => this.island.startEvent(this.idx), 600); };
-        $('r-edit').onclick = () => { close(); this.island.endEvent(false, this.idx); setTimeout(() => this.app.editMonster(), 900); };
-      }
+      $('r-back').onclick = () => { close(); this.island.endEvent(won, this.idx, out); };
+      if (again) $('r-retry').onclick = () => { close(); this.island.endEvent(won, this.idx, out); setTimeout(() => this.island.startEvent(this.idx), 600); };
+      if (!won) $('r-edit').onclick = () => { close(); this.island.endEvent(false, this.idx, out); setTimeout(() => this.app.editMonster(), 900); };
     }, won ? 2200 : 1500);
   }
 

@@ -122,7 +122,48 @@ export const ADDONS = {
       const wing = (s) => { const g = new THREE.ConeGeometry(0.32, 0.6, 4); g.rotateZ(s * Math.PI / 2); g.translate(s * 0.3, 0.2, 0); g.scale(1, 1, 0.5); return mesh(g, m, 'felt'); };
       return group(wing(1), wing(-1), at(mesh(sph(0.13, 10, 8), m, 'felt'), 0, 0.2, 0));
     } },
+  // face stamps: put them anywhere (yes, anywhere)
+  tongue: { label: 'Tongue', size: 0.2, color: '#e8546f', mirror: false, wiggle: true,
+    make: (m) => { const g = taper([[0, -0.05, 0], [0, 0.3, -0.04], [0, 0.55, -0.28], [0, 0.6, -0.72]], 0.22, 0.14, 14, 20); g.scale(1.25, 1, 0.75); return mesh(g, m, 'vinyl'); } },
+  teeth: { label: 'Buck teeth', size: 0.13, color: BONE, mirror: false,
+    make: (m) => {
+      const tooth = (x) => { const g = new THREE.CapsuleGeometry(0.2, 0.45, 4, 10); g.scale(1, 1, 0.45); g.translate(x, 0.32, 0); g.rotateX(-0.25); return mesh(g, m, 'vinyl'); };
+      return group(tooth(-0.22), tooth(0.22));
+    } },
+  fangs: { label: 'Fang row', size: 0.18, color: BONE, mirror: false,
+    make: (m) => group(...[-0.48, -0.24, 0, 0.24, 0.48].map((x, i) => { const g = up(new THREE.ConeGeometry(0.1 + (i % 2) * 0.03, 0.42 + (i % 2) * 0.2, 10), 0.2); g.rotateX(-0.5); return at(mesh(g, m, 'vinyl'), x, 0, Math.abs(x) * -0.3); })) },
+  mouth2: { label: 'Extra mouth', size: 0.2, color: '#c2185b', mirror: false,
+    make: (m, fixed) => {
+      const hole = sph(0.5, 24, 12); hole.scale(1, 0.18, 0.42);
+      const lips = new THREE.TorusGeometry(0.5, 0.1, 10, 28); lips.rotateX(Math.PI / 2); lips.scale(1, 1, 0.48);
+      const g = group(at(mesh(hole, fixed('#2a0f1c')), 0, 0.03, 0), at(mesh(lips, m, 'vinyl'), 0, 0.08, 0));
+      for (const x of [-0.24, 0, 0.24]) g.add(at(mesh(new THREE.ConeGeometry(0.06, 0.16, 8), fixed(WHITE), 'vinyl'), x, 0.1, 0.13));
+      return g;
+    } },
+  eyestalk: { label: 'Eye stalk', size: 0.3, color: 'body', mirror: true, wiggle: true,
+    make: (m) => {
+      const g = group(mesh(taper([[0, -0.05, 0], [0, 0.35, 0.05], [0, 0.65, 0.15], [0, 0.8, 0.22]], 0.09, 0.06, 10, 14), m));
+      const e = ADDONS.eye.make(); e.scale.setScalar(0.24); e.position.set(0, 0.86, 0.22); g.add(e);
+      g.userData.eye = e.userData.eye;
+      return g;
+    } },
+  wart: { label: 'Warts', size: 0.1, color: '#9bc53d', mirror: false,
+    make: (m) => group(at(mesh(sph(0.42), m), 0, 0.1, 0), at(mesh(sph(0.26), m), 0.42, 0.04, 0.12), at(mesh(sph(0.18), m), -0.3, 0.02, -0.3), at(mesh(sph(0.12), m), 0.06, 0.48, 0.06)) },
+  bandage: { label: 'Bandage', size: 0.18, color: '#f2d0a9', mirror: false,
+    make: (m, fixed) => {
+      const strip = new THREE.CapsuleGeometry(0.2, 0.9, 4, 12); strip.rotateZ(Math.PI / 2); strip.scale(1, 0.18, 1); strip.rotateY(0.6);
+      const pad = new THREE.BoxGeometry(0.34, 0.08, 0.3); pad.rotateY(0.6);
+      return group(at(mesh(strip, m, 'felt'), 0, 0.03, 0), at(mesh(pad, fixed('#fbf8f0'), 'felt'), 0, 0.07, 0));
+    } },
 };
+
+// add-on grid sections (anything not listed lands in BODY)
+export const ADDON_SECTIONS = [
+  ['FACE', '顔', ['eye', 'eyestalk', 'mouth2', 'tongue', 'teeth', 'fangs', 'nose', 'bignose', 'carrot', 'mustache', 'handlebar', 'shades', 'pixelshades', 'partyshades', 'wart', 'bandage']],
+  ['HEAD', '頭', ['horn', 'bullhorn', 'antlers', 'antenna', 'ear', 'bunny', 'tuft', 'flower']],
+  ['HATS', '帽', ['crown', 'partyhat', 'tophat', 'beanie', 'cowboy', 'viking', 'pirate', 'bowtie']],
+  ['BODY', '体', null],
+];
 
 // ---------- free models (Poly Pizza / Quaternius / Kenney; credits in public/assets/addons/CREDITS.json) ----------
 // rot: euler that turns the file so it sticks out along +Y (away from the body); face-worn

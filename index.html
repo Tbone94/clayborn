@@ -104,6 +104,7 @@
             <div class="tool-group">
               <button class="tool" id="btn-clear" title="Clear the selected part"><b>✕</b><small>PART</small></button>
               <button class="tool danger" id="btn-clear-all" title="Wipe every part and start over"><b>✕</b><small>ALL</small></button>
+              <button class="tool" id="btn-sym" title="Mirror drawing (M): whatever you draw on one side appears on the other"><b>⇆</b><small>MIRROR</small></button>
             </div>
             <label class="slider-row" title="How puffy the selected part is"><span>CHUB</span><input type="range" id="puff" min="0.35" max="1.9" step="0.01" value="1" /><b id="puff-val">100%</b></label>
           </div>
@@ -124,6 +125,8 @@
           <div class="chips" id="eyes"></div>
           <h3><span>MOUTH</span><i>口</i></h3>
           <div class="chips" id="mouths"></div>
+          <h3><span>VOICE</span><i>声</i><em>tap to hear it</em></h3>
+          <div class="chips" id="voices"></div>
         </div>
         <div class="pane-next"><button class="btn small" data-go="shape">◀ Shape</button><button class="btn primary" data-go="addons">Next: Add-ons ▶</button></div>
       </div>
@@ -163,6 +166,7 @@
       </div>
       <button class="btn big primary" id="btn-done"><span>BRING TO LIFE</span><small>出撃</small></button>
     </div>
+    <div class="birth-stamp hidden" id="birth-stamp"><b>誕生</b><span id="birth-name">IT'S ALIVE!</span></div>
     <div class="center-tip" id="center-tip"><span id="center-tip-txt">drag to spin · click to poke</span></div>
   </section>
 

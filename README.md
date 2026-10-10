@@ -30,6 +30,21 @@ npm run build      # static site in dist/ — drop it on itch.io / GitHub Pages 
    - **Bonk Bowl** (相撲): shove everyone off a shrinking drum.
    - **Sky Leap** (飛翔): sprint off a cliff and glide.
 7. Lost? The results screen tells you *what to redraw* ("a big tail makes you swim faster"). Hit "Redraw my monster", change the shape and try again.
+8. **Side games** (no Gloom, just records). Walk up to each landmark and press E:
+   - **Cursed Pageant** (品評会): judges score categories measured from your shape (tallest, leggiest, most cursed…). Strike a pose on time for bonus points.
+   - **Dance-off** (踊り): arrows on the beat against a local. Long limbs = bigger moves.
+   - **Roly Rumble** (転がり): a downhill race. Tuck into a ball to go faster; Roly monsters are born for it.
+   - **Pier Fishing** (釣り): cast, hook, reel in cursed clay fish. A bigger tail makes reeling easier.
+   - **Hide & Seek** (かくれんぼ): ring the bell near the meadow; the locals hide behind trees. Found ones follow you around.
+9. **Daily challenge** (今日): the noticeboard by the meadow has one challenge a day (the same for everyone), often with a twist like "win Ridge Run with no legs". Finish it for a stamp; come back daily for a streak.
+
+**Making monsters, extra bits:**
+- **呪 Curse** (Shape step) randomly mutates your monster: noodle legs, double header, melted, long boi… Undo takes it back.
+- **Mirror** (⇆, or M) repeats what you draw across the middle line.
+- **Voice** (Paint step): Chirpy, Squeaky, Gruff, Robot, Warbly or Whispery.
+- **Face stamps** (Add-ons → FACE): tongues, buck teeth, fang rows, extra mouths, eye stalks, warts and bandages. Stick them anywhere.
+- **Card** makes a trading card of your monster (stats, a Curse Level and a rude little bio) you can save or copy.
+- Bring it to life and it gets baked in the kiln first.
 
 **Controls:** WASD / arrows to move · Space to jump (hold to glide) · Shift to dash · E to interact / pet · F to swap monsters · drag to look.
 Touch screens get a joystick and buttons. In the Mold Lab, keys 1–7 switch parts, B/E/O pick brush/eraser/oval, Enter goes to the next step, Ctrl+Z undoes.
@@ -57,11 +72,13 @@ Share a creature with the **Share** button (a compact code), or link to `…/#c=
 ## Project layout
 
 ```
-src/creature/  field.js (EDT + Poisson) · builder.js (SDF, joints, mesh, skinning) · mesher.js (surface nets) · addons.js (stick-on pieces)
+src/creature/  field.js (EDT + Poisson) · builder.js (SDF, joints, mesh, skinning) · mesher.js (surface nets) · addons.js (stick-on pieces) · mutate.js (curses)
                creature.js (rig, gait, googly eyes) · stats.js · generator.js (procedural doodler) · frames.js
-src/ui/        creator.js (sketchbook) · input.js
+src/ui/        creator.js (sketchbook) · card.js (trading cards) · input.js
 src/scenes/    studio.js · island.js · common.js (water, sky, particles, props)
-src/events/    base.js · race.js · bonk.js · leap.js
+src/events/    base.js · race.js · bonk.js · leap.js (Gloom events) · pageant.js · dance.js · downhill.js · fishing.js (side games)
+src/game/      body.js · garden.js · hideseek.js · daily.js
+src/world/     nature.js · assets.js · landmarks.js (side-game props)
 src/fx/        clay.js (material) · render.js (post) · audio.js
 ```
 

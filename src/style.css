@@ -281,6 +281,9 @@ input[type=range]::-moz-range-thumb { width: 12px; height: 22px; border-radius: 
 /* add-ons */
 .addon-hint { font: 700 13px/1.35 var(--ui); background: var(--ink); color: var(--yellow); padding: 7px 10px; flex: none; }
 .addon-grid { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(82px, 1fr)); gap: 7px; align-content: start; padding: 2px 4px 4px 0; }
+.addon-sec { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 8px; margin: 8px 0 0; padding-bottom: 3px; border-bottom: 2px solid var(--ink); font: 400 14px var(--display); }
+.addon-sec:first-child { margin-top: 0; }
+.addon-sec i { font: 400 12px var(--dot); font-style: normal; color: var(--red); }
 .addon-tile { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 4px 2px 5px; cursor: pointer; background: var(--white); border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--ink); color: var(--ink); transition: transform .08s; }
 .addon-tile canvas { width: 64px; height: 64px; }
 .addon-tile span { font: 900 10.5px var(--ui); text-transform: uppercase; letter-spacing: .03em; text-align: center; line-height: 1.15; }
@@ -350,11 +353,26 @@ input[type=range]::-moz-range-thumb { width: 12px; height: 22px; border-radius: 
 /* ---------- modal / toast ---------- */
 .modal { position: fixed; inset: 0; background: rgba(21, 23, 43, .55); display: flex; align-items: center; justify-content: center; z-index: 20; }
 .modal-card { width: min(540px, 92vw); padding-bottom: 20px; animation: card-in .35s cubic-bezier(.2, 1.3, .4, 1); }
+.birth-stamp { position: absolute; left: 50%; top: 14%; transform: translateX(-50%); pointer-events: none; display: flex; flex-direction: column; align-items: center; gap: 10px; width: max-content; max-width: 92vw; }
+.birth-stamp b, .birth-stamp span { animation: slam .45s cubic-bezier(.2, 1.3, .4, 1) both; }
+.birth-stamp b { font: 400 34px var(--dot); color: var(--ink); background: var(--yellow); padding: 4px 10px; box-shadow: 5px 5px 0 var(--red); }
+.birth-stamp span { font: 400 clamp(30px, 6vw, 58px) var(--display); color: var(--white); background: var(--ink); padding: 6px 22px; box-shadow: 8px 8px 0 var(--red); text-align: center; line-height: 1.15; animation-delay: .08s; }
+#creator .panel, #creator .center-tip { transition: opacity .35s, transform .35s; }
+#creator.birthing .panel { opacity: 0; pointer-events: none; }
+#creator.birthing .center-tip { visibility: hidden; }
+#creator.birthing .paper-panel { transform: translateX(-30px); }
+#creator.birthing .look-panel { transform: translateX(30px); }
 @keyframes card-in { from { transform: translateX(-40px) skewX(8deg); opacity: 0; } to { transform: none; opacity: 1; } }
 .modal-card p { font: 500 15px/1.5 var(--ui); color: var(--ink-2); margin: 14px 20px; }
 .modal-card textarea { display: block; width: calc(100% - 40px); margin: 0 20px; height: 110px; font: 400 12px var(--dot); border: 2px solid var(--ink); border-radius: 0; padding: 10px; background: var(--white); resize: none; user-select: text; }
 .modal-card .row { display: flex; gap: 16px; padding: 0 22px; margin-top: 16px; flex-wrap: wrap; }
 .results { margin: 14px 20px 4px; }
+.modal-card p.record { margin: 10px 20px 0; font: 400 15px var(--dot); color: var(--red); }
+.prompt p.warn { color: var(--red); font-weight: 700; }
+.prompt p.stamps { font: 400 13px var(--dot); color: var(--ink-2); margin-top: -4px; }
+.stamp-award { display: flex; flex-direction: column; align-items: center; margin: 18px auto 0; width: 120px; height: 120px; justify-content: center; border: 6px solid var(--red); border-radius: 50%; transform: rotate(-12deg); color: var(--red); animation: slam .45s cubic-bezier(.2, 1.3, .4, 1) both; }
+.stamp-award b { font: 400 46px/1 var(--display); }
+.stamp-award span { font: 400 13px var(--dot); letter-spacing: .1em; }
 .modal-card img.monster-card { display: block; margin: 16px auto 0; width: auto; max-width: calc(100% - 40px); max-height: 62dvh; border: 2px solid var(--ink); box-shadow: 6px 6px 0 var(--red); }
 .modal-card a.btn { text-decoration: none; }
 .tool.curse b { color: var(--red); }
@@ -362,7 +380,7 @@ input[type=range]::-moz-range-thumb { width: 12px; height: 22px; border-radius: 
 .results div i { font: 400 18px var(--display); font-style: normal; color: var(--red); margin-right: 12px; }
 .results div span:last-child { font: 400 14px var(--dot); }
 .results div.me { background: var(--yellow); transform: skewX(-8deg); border-bottom-color: transparent; box-shadow: 4px 4px 0 var(--ink); }
-.toast { position: fixed; left: 50%; top: 22px; transform: translateX(-50%) skewX(-10deg); background: var(--ink); color: var(--yellow); padding: 10px 20px; font: 900 14px var(--ui); text-transform: uppercase; letter-spacing: .05em; z-index: 30; box-shadow: 4px 4px 0 var(--red); }
+.toast { position: fixed; left: 50%; top: max(78px, calc(env(safe-area-inset-top) + 70px)); transform: translateX(-50%) skewX(-10deg); background: var(--ink); color: var(--yellow); padding: 10px 20px; font: 900 14px var(--ui); text-transform: uppercase; letter-spacing: .05em; z-index: 30; box-shadow: 4px 4px 0 var(--red); }
 
 /* ---------- small screens ---------- */
 .mobile-only { display: none; }

@@ -77,7 +77,7 @@ export class Roamer {
     this.emote.visible = true; this.emoteT = dur; this.emotePop = 0;
   }
 
-  voice(n = 3, mood = 0) { babble(1.4 / Math.pow(Math.max(0.4, this.b.P.mass), 0.3), n, mood); }
+  voice(n = 3, mood = 0) { babble(1.4 / Math.pow(Math.max(0.4, this.b.P.mass), 0.3), n, mood, this.c.design.voice); }
 
   dispose() { this.c.group.remove(this.emote); if (this.tag) this.c.group.remove(this.tag); }
 }
@@ -128,6 +128,8 @@ export class Garden {
     const rs = this.roamers;
     for (const r of rs) {
       const b = r.b;
+      // hide & seek: stay put, keep quiet, no name tag giving you away
+      if (r.hiding) { b.step(dt, { mx: 0, mz: 0 }, this.island.world); r.c.update(dt); if (r.tag) r.tag.visible = false; continue; }
       let mx = 0, mz = 0, jump = false;
       r.timer -= dt; r.greetCD -= dt; r.chatCD -= dt;
       const pd = player ? Math.hypot(player.x - b.x, player.z - b.z) : 99;

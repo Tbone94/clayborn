@@ -200,6 +200,6 @@ export class RaceEvent extends EventBase {
     if (this.track.falls > 0) advice = `You fell into the chasm ${this.track.falls}×. ` + advice;
     else if (this.track.swim > 6) advice = `You spent ${this.track.swim.toFixed(1)}s swimming the river. ` + advice;
     if (won) advice = `${me.c.design.name} crossed the line first. The Gloom on Ridge Run is fading!`;
-    this.finish(won, rows, advice);
+    this.finish(won, rows, advice, me.done ? { time: me.done } : {});
   }
 }

@@ -72,25 +72,47 @@ export const sfx = {
   sparkle: () => { for (let i = 0; i < 6; i++) tone(1200 + Math.random() * 1600, { t: i * 0.04, dec: 0.15, vol: 0.06 }); },
 };
 
-// Creature voices: pitched gibberish with vowel formants.
+// Creature voices: pitched gibberish with vowel formants. Each monster picks a voice style in the Mold Lab.
 const VOWELS = [[800, 1150], [400, 1600], [300, 2300], [450, 800], [325, 700], [600, 1000]];
-export function babble(pitch = 1, syllables = 4, mood = 0) {
+export const VOICES = { chirpy: 'Chirpy', squeaky: 'Squeaky', gruff: 'Gruff', robot: 'Robot', warbly: 'Warbly', whisper: 'Whispery' };
+const STYLE = {
+  chirpy: { p: 1, wave: 'sawtooth', dur: 1, vol: 0.22 },
+  squeaky: { p: 1.85, wave: 'triangle', dur: 0.65, vol: 0.2 },
+  gruff: { p: 0.5, wave: 'square', dur: 1.35, vol: 0.13, growl: true },
+  robot: { p: 0.9, wave: 'square', dur: 1.1, vol: 0.1, steps: true },
+  warbly: { p: 1.1, wave: 'sawtooth', dur: 1.2, vol: 0.2, vibrato: true },
+  whisper: { p: 1, wave: null, dur: 1.15, vol: 0.5 },
+};
+export function babble(pitch = 1, syllables = 4, mood = 0, voice = 'chirpy') {
   if (!ctx) return;
+  const S = STYLE[voice] || STYLE.chirpy;
   let t = ctx.currentTime + 0.02;
   for (let i = 0; i < syllables; i++) {
-    const dur = 0.07 + Math.random() * 0.07;
-    const f0 = 210 * pitch * (1 + (Math.random() - 0.5) * 0.35 + mood * 0.08 * i);
-    const o = ctx.createOscillator(); o.type = 'sawtooth';
-    o.frequency.setValueAtTime(f0, t); o.frequency.linearRampToValueAtTime(f0 * (0.9 + Math.random() * 0.25), t + dur);
+    const dur = (0.07 + Math.random() * 0.07) * S.dur;
+    let f0 = 210 * pitch * S.p * (1 + (Math.random() - 0.5) * 0.35 + mood * 0.08 * i);
+    if (S.steps) f0 = 210 * pitch * S.p * Math.pow(2, [0, 3, 5, 7, 10][(Math.random() * 5) | 0] / 12);
+    let src;
+    if (S.wave) {
+      src = ctx.createOscillator(); src.type = S.wave;
+      src.frequency.setValueAtTime(f0, t);
+      if (!S.steps) src.frequency.linearRampToValueAtTime(f0 * (0.9 + Math.random() * 0.25), t + dur);
+      if (S.vibrato) {
+        const lfo = ctx.createOscillator(), lg = ctx.createGain();
+        lfo.frequency.value = 9 + Math.random() * 4; lg.gain.value = f0 * 0.12;
+        lfo.connect(lg); lg.connect(src.frequency); lfo.start(t); lfo.stop(t + dur + 0.05);
+      }
+    } else { src = ctx.createBufferSource(); src.buffer = noiseBuf; }
     const [F1, F2] = VOWELS[(Math.random() * VOWELS.length) | 0];
-    const out = ctx.createGain(); env(out, t, 0.01, 0.22, dur);
-    for (const [F, q, v] of [[F1, 6, 1], [F2, 9, 0.6]]) {
-      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = F * Math.min(1.3, Math.max(0.8, pitch)); bp.Q.value = q;
+    const out = ctx.createGain(); env(out, t, 0.01, S.vol, dur);
+    for (const [F, q, v] of [[F1, S.wave ? 6 : 12, 1], [F2, S.wave ? 9 : 14, 0.6]]) {
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = F * Math.min(1.3, Math.max(0.8, pitch * (S.p > 1.5 ? 1.25 : 1))); bp.Q.value = q;
       const vg = ctx.createGain(); vg.gain.value = v;
-      o.connect(bp); bp.connect(vg); vg.connect(out);
+      src.connect(bp); bp.connect(vg); vg.connect(out);
     }
+    if (S.growl) noise({ t: t - ctx.currentTime, dec: dur, vol: 0.06, f0: 300, f1: 120 });
     out.connect(sfxBus);
-    o.start(t); o.stop(t + dur + 0.05);
+    if (S.wave) src.start(t); else src.start(t, Math.random());
+    src.stop(t + dur + 0.05);
     t += dur + 0.02 + Math.random() * 0.04;
   }
 }

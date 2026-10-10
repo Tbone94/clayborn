@@ -146,6 +146,6 @@ export class LeapEvent extends EventBase {
     const S = me.c.stats;
     let advice = won ? `${(me.dist).toFixed(1)} m! The Sky Leap Gloom is blowing away.` : adviceFor(S, me.P.glide > 0 ? ['glide', 'speed'] : ['glide']);
     if (!won && me.P.glide === 0) advice = 'No wings, no glide! ' + advice + ' Hold <b>Space</b> after jumping to glide.';
-    this.finish(won, rows, advice);
+    this.finish(won, rows, advice, { dist: me.dist ?? 0 });
   }
 }

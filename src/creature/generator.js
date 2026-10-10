@@ -150,9 +150,11 @@ export function randomDesign(seed = (Math.random() * 1e9) | 0, opts = {}) {
   d.eyes = pick(r, ['googly', 'googly', 'googly', 'dot', 'sleepy', 'angry', 'cyclops', 'tri']);
   d.eyeSize = rr(r, 0.8, 1.35);
   d.mouth = pick(r, ['smile', 'smile', 'fangs', 'o', 'none']);
-  for (const k of ['pattern', 'finish', 'eyes', 'eyeSize', 'mouth']) if (opts[k] != null) d[k] = opts[k];
+  for (const k of ['pattern', 'finish', 'eyes', 'eyeSize', 'mouth', 'voice']) if (opts[k] != null) d[k] = opts[k];
   d.name = randomName(r);
   d.seed = seed;
+  // voice from its own stream so it doesn't reshuffle every existing seeded monster
+  if (!opts.voice) d.voice = ['chirpy', 'chirpy', 'squeaky', 'gruff', 'robot', 'warbly', 'whisper'][rng(seed + 7)() * 7 | 0];
   return d;
 }
 

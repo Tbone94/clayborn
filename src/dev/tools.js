@@ -19,7 +19,9 @@ export function installDevTools(app) {
     async toIsland(seed = 4242, opts = { frame: 'quad' }) {
       if (app.mode !== 'island') {
         app.goCreator(randomDesign(seed, opts)); await wait(1200); dev.step(4);
-        document.getElementById('btn-done').click(); await wait(1500); dev.step(4);
+        document.getElementById('btn-done').click(); await wait(200); app.studio.hurryBirth();
+        for (let i = 0; i < 80 && app.mode !== 'island'; i++) { dev.step(6); await wait(100); } // the kiln birth + wipe
+        await wait(300); dev.step(4);
       }
       return app.island;
     },
@@ -34,6 +36,27 @@ export function installDevTools(app) {
       window.trailerProgress = 'starting';
       import('../trailer/cinema.js').then(({ Cinema }) => new Cinema(app).run(opts)).catch((e) => { window.trailerProgress = 'error: ' + e.message; console.error(e); });
       return 'started';
+    },
+    // play a side game straight away: dev.play('pageant', 'Cursed Pageant') loads src/events/pageant.js
+    async play(id, name = id) {
+      await dev.toIsland();
+      const mod = await import(/* @vite-ignore */ `../events/${id}.js`);
+      const Event = Object.values(mod).find((v) => typeof v === 'function' && /Event$/.test(v.name));
+      app.island.startEvent({ id, name, jp: '', side: true, Event, x: 0, z: 2 });
+      return 'started ' + Event.name;
+    },
+    // save a studio portrait of a creature (the Mold Lab's, or the player's) into ./captures
+    async photo(name, { size = 1000, yaw = -0.5, tight = 0.95, creature } = {}) {
+      const c = creature || (app.mode === 'creator' ? app.creator.creature : app.player);
+      const cv = app.studio.photo(c, size, yaw, tight);
+      const blob = await new Promise((r) => cv.toBlob(r, 'image/jpeg', 0.92));
+      app.frame();
+      return (await fetch('/__capture?name=' + encodeURIComponent(name), { method: 'POST', body: blob })).status;
+    },
+    // hide every sprite (signs, name tags, emotes) for clean marketing shots
+    clean(on = true) {
+      const sc = app.island.activeEvent ? app.island.activeEvent.scene : app.mode === 'creator' ? app.studio.scene : app.island.scene;
+      sc.traverse((o) => { if (o.isSprite) o.visible = !on; });
     },
     cam(yaw, pitch, dist) { const i = app.island; i.camYaw = yaw; i.camPitch = pitch; i.camDist = dist; },
   };

@@ -18,7 +18,7 @@ const $ = (id) => document.getElementById(id);
 const QUIZ = [
   { q: 'Pick a snack.', a: [['Watermelon', { palette: 3 }], ['Hot pepper', { pattern: 'lava', palette: 11 }], ['Cake', { palette: 14, finish: 'vinyl' }], ['Raw fish', { tail: true, palette: 4, frame: 'serpent' }]] },
   { q: 'Your perfect weekend?', a: [['Running around', { frame: 'quad' }], ['A big nap', { frame: 'roller' }], ['Bug hunting', { frame: 'crawler' }], ['Flying kites', { frame: 'flyer', wings: true }]] },
-  { q: 'Pick a sound.', a: [['Boing!', { eyes: 'googly', mouth: 'smile' }], ['ROAR', { mouth: 'fangs', eyes: 'angry' }], ['Squeak', { eyes: 'googly', eyeSize: 1.5, mouth: 'o' }], ['Hmmmm…', { eyes: 'sleepy', finish: 'felt' }]] },
+  { q: 'Pick a sound.', a: [['Boing!', { eyes: 'googly', mouth: 'smile', voice: 'chirpy' }], ['ROAR', { mouth: 'fangs', eyes: 'angry', voice: 'gruff' }], ['Squeak', { eyes: 'googly', eyeSize: 1.5, mouth: 'o', voice: 'squeaky' }], ['Hmmmm…', { eyes: 'sleepy', finish: 'felt', voice: 'whisper' }]] },
 ];
 const MAX_ROSTER = 10;
 
@@ -95,6 +95,7 @@ class App {
     let down = null;
     gl.addEventListener('pointerdown', (e) => {
       if (this.mode !== 'creator') return;
+      if (this.birthing) { this.studio.hurryBirth(); return; }
       const piece = this.creator.canvasDown(e);
       down = { x: e.clientX, y: e.clientY, moved: 0, piece };
       if (!piece) this.studio.dragging = true;
@@ -118,6 +119,7 @@ class App {
 
   setMode(mode) {
     this.mode = mode;
+    if (mode !== 'island') this.island.hideSeek?.abort();
     if (mode === 'title') {
       this.show('title');
       this.island.enterAttract();
@@ -133,12 +135,13 @@ class App {
       this.resize();
     } else if (mode === 'island') {
       this.show('hud');
-      $('btn-edit').classList.remove('hidden');
+      for (const id of ['btn-edit', 'btn-new', 'btn-hud-card']) $(id).classList.remove('hidden');
       this.gfx.setLook({ blur: 0, vignette: 0.24, bloom: 0.1, world: true });
       playMusic('island'); setAmbience(0.05);
     } else if (mode === 'event') {
       this.show('hud');
-      $('btn-edit').classList.add('hidden'); $('prompt').classList.add('hidden'); $('controls-hint').classList.add('hidden');
+      for (const id of ['btn-edit', 'btn-new', 'btn-hud-card']) $(id).classList.add('hidden');
+      $('prompt').classList.add('hidden'); $('controls-hint').classList.add('hidden');
       this.gfx.setLook({ blur: 0, vignette: 0.26, bloom: 0.1, world: true });
       playMusic('event'); setAmbience(0.03);
     }
@@ -214,9 +217,22 @@ class App {
   finishCreator() {
     const A = this.creator.creature.analysis;
     if (!A || A.empty) { this.toast('Draw a body (or a head) first!'); sfx.bonk(); return; }
-    sfx.fanfare();
+    if (this.birthing) return;
     const design = this.creator.design;
+    // the birth: the kiln bakes it, it pops out, then off to the island
+    this.birthing = true;
+    this.creator.setPhase('shape', true); this.creator.creature.frozen = false;
+    $('creator').classList.add('birthing');
+    this.studio.birth(() => {
+      $('birth-name').textContent = `${design.name.toUpperCase()} IS ALIVE!`;
+      $('birth-stamp').classList.remove('hidden');
+      babble(1.2, 5, 1, design.voice);
+    }).then(() => setTimeout(() => this.bringToLife(design), 450));
+  }
+
+  bringToLife(design) {
     this.transition(() => {
+      $('birth-stamp').classList.add('hidden'); $('creator').classList.remove('birthing'); this.birthing = false;
       this.creator.creature.build(design, 64);
       const old = this.player;
       this.player = this.creator.creature;
@@ -234,7 +250,6 @@ class App {
       this.island.setPets(this.petEntries());
       this.setMode('island');
       this.refreshOrbs();
-      setTimeout(() => babble(1.2, 5, 1), 600);
       if (this.save.roster.length === 1) setTimeout(() => this.toast('Every monster you make lives on this island'), 2500);
     });
   }

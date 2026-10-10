@@ -15,6 +15,9 @@ import { sfx, babble } from '../fx/audio.js';
 import { RaceEvent } from '../events/race.js';
 import { BonkEvent } from '../events/bonk.js';
 import { LeapEvent } from '../events/leap.js';
+import { pageantStage, danceFloor, startGate, fishingSpot, bellFrame, noticeBoard } from '../world/landmarks.js';
+import { HideSeek } from '../game/hideseek.js';
+import { today, checkDaily } from '../game/daily.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -25,6 +28,23 @@ export const ZONES = [
 ];
 for (const z of ZONES) { z.x = Math.cos(z.ang) * z.dist; z.z = Math.sin(z.ang) * z.dist; }
 const SPAWN = { x: 0, z: 2 };
+
+// side games: no Gloom, just fun + records. Each has a little landmark on the island.
+const ring = (ang, dist) => ({ ang, x: Math.cos(ang) * dist, z: Math.sin(ang) * dist });
+export const SPOTS = [
+  { id: 'pageant', name: 'Cursed Pageant', jp: '品評会', ...ring(1.62, 15), color: '#ff8fd0', side: true, path: true,
+    desc: 'The judges score your monster\'s actual shape. Tallest? Leggiest? Most cursed? Strike a pose!', load: () => import('../events/pageant.js').then((m) => m.PageantEvent) },
+  { id: 'dance', name: 'Dance-off', jp: '踊り', ...ring(3.62, 15), color: '#2fe0c0', side: true, path: true,
+    desc: 'Hit the arrows on the beat in a disco face-off. Longer legs and arms make BIG MOVES worth more points.', load: () => import('../events/dance.js').then((m) => m.DanceEvent) },
+  { id: 'downhill', name: 'Roly Rumble', jp: '転がり', ...ring(5.42, 16), color: '#4fc3ff', side: true, path: true,
+    desc: 'Race down a winding clay mountain. Hold SHIFT / 突 to tuck into a ball: faster, but harder to steer. Rolies rule.', load: () => import('../events/downhill.js').then((m) => m.DownhillEvent) },
+  { id: 'fishing', name: 'Pier Fishing', jp: '釣り', x: 32.2, z: 11.4, color: '#5aa9e6', side: true, flat: false,
+    desc: 'Cast from the pier, hook the bite, reel in cursed clay fish. Land 6 kg in 75 s. A big tail makes reeling easier.', load: () => import('../events/fishing.js').then((m) => m.FishingEvent) },
+  { id: 'hideseek', name: 'Hide & Seek', jp: 'かくれんぼ', x: SPAWN.x + 8.6, z: SPAWN.z - 1.4, color: '#9bc53d', kind: 'hideseek',
+    desc: 'The locals hide around the island. Find all four before time runs out. Listen for giggles!' },
+  { id: 'board', name: 'Daily Challenge', jp: '今日', x: SPAWN.x + 3.5, z: SPAWN.z - 3, kind: 'board' },
+];
+const gameSpot = (id) => SPOTS.find((s) => s.id === id);
 const _target = new THREE.Vector3(), _origin = new THREE.Vector3();
 
 // dirt trails: a ring round the meadow + a path out to every totem
@@ -35,11 +55,12 @@ function segDist(px, pz, ax, az, bx, bz) {
 function pathWeight(x, z) {
   let d = Math.abs(Math.hypot(x - SPAWN.x, z - SPAWN.z) - 7.5);
   for (const zn of ZONES) d = Math.min(d, segDist(x, z, SPAWN.x + Math.cos(zn.ang) * 7.5, SPAWN.z + Math.sin(zn.ang) * 7.5, zn.x - Math.cos(zn.ang) * 3.5, zn.z - Math.sin(zn.ang) * 3.5));
+  for (const sp of SPOTS) if (sp.path) d = Math.min(d, segDist(x, z, SPAWN.x + Math.cos(sp.ang) * 7.5, SPAWN.z + Math.sin(sp.ang) * 7.5, sp.x - Math.cos(sp.ang) * 2.8, sp.z - Math.sin(sp.ang) * 2.8));
   const wob = fbm2(x * 0.2, z * 0.2) * 0.5;
   return smoothstep(1.6 + wob, 0.7 + wob, d);
 }
 
-export function islandH(x, z) {
+function rawH(x, z) {
   const r = Math.hypot(x, z), a = Math.atan2(z, x);
   const coast = 40 + 4.5 * Math.sin(3 * a + 1) + 2.5 * Math.sin(5 * a + 2) + 3 * fbm2(x * 0.03, z * 0.03);
   const t = 1 - r / coast;
@@ -48,8 +69,15 @@ export function islandH(x, z) {
   h += Math.max(0, fbm2(x * 0.045 + 7, z * 0.045 - 3) * 6.5 + 1.2) * smoothstep(0.08, 0.5, t);
   // soft terraces — the stacked-clay look
   if (h > 0.4) { const st = 1.25, k = (h - 0.4) / st, f = k - Math.floor(k); h = 0.4 + (Math.floor(k) + smoothstep(0.3, 0.7, f)) * st; }
-  // flatten plateaus for spawn & totems
-  for (const p of [{ x: SPAWN.x, z: SPAWN.z, r: 7, h: 1.65 }, ...ZONES.map((z) => ({ x: z.x, z: z.z, r: 6, h: 1.65 + (z === ZONES[2] ? 2.5 : 0) }))]) {
+  return h;
+}
+// the side-game landmarks sit on little levelled pads at the ground height they landed on
+const PADS = SPOTS.filter((s) => s.flat !== false && s.path).map((s) => ({ x: s.x, z: s.z, r: 3.2, h: Math.max(1.2, rawH(s.x, s.z)) }));
+
+export function islandH(x, z) {
+  let h = rawH(x, z);
+  // flatten plateaus for spawn, totems and side-game pads
+  for (const p of [{ x: SPAWN.x, z: SPAWN.z, r: 7, h: 1.65 }, ...ZONES.map((z) => ({ x: z.x, z: z.z, r: 6, h: 1.65 + (z === ZONES[2] ? 2.5 : 0) })), ...PADS]) {
     const d = Math.hypot(x - p.x, z - p.z);
     h = lerp(h, p.h, smoothstep(p.r * 1.6, p.r * 0.7, d));
   }
@@ -62,10 +90,13 @@ function label(text, jp = '') {
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
   const draw = () => {
     const x = c.getContext('2d'); x.clearRect(0, 0, 768, 160);
-    x.font = '400 70px "Dela Gothic One", sans-serif';
-    const tw = x.measureText(text.toUpperCase()).width;
+    // shrink long titles so they always fit on the slab
+    let fs = 70;
     x.font = '400 40px "DotGothic16", monospace';
     const jw = jp ? x.measureText(jp).width + 30 : 0;
+    x.font = `400 ${fs}px "Dela Gothic One", sans-serif`;
+    let tw = x.measureText(text.toUpperCase()).width;
+    if (tw + jw + 70 > 740) { fs = Math.floor(fs * (670 - jw) / tw); x.font = `400 ${fs}px "Dela Gothic One", sans-serif`; tw = x.measureText(text.toUpperCase()).width; }
     const w = Math.min(740, tw + jw + 70);
     x.save(); x.translate(384, 80); x.transform(1, 0, -0.22, 1, 0, 0);
     x.fillStyle = '#e63b2e'; x.fillRect(-w / 2 + 10, -50, w, 104);
@@ -77,7 +108,7 @@ function label(text, jp = '') {
       x.fillStyle = '#15172b'; x.font = '400 40px "DotGothic16", monospace'; x.textBaseline = 'middle'; x.fillText(jp, cx + 4, 72);
       cx += jw;
     }
-    x.fillStyle = '#fbf8f0'; x.font = '400 70px "Dela Gothic One", sans-serif'; x.textBaseline = 'middle'; x.fillText(text.toUpperCase(), cx, 74);
+    x.fillStyle = '#fbf8f0'; x.font = `400 ${fs}px "Dela Gothic One", sans-serif`; x.textBaseline = 'middle'; x.fillText(text.toUpperCase(), cx, 74);
     t.needsUpdate = true;
   };
   draw(); document.fonts?.ready.then(draw);
@@ -98,6 +129,7 @@ export class Island {
     this.buildProps();
     this.buildZones();
     this.buildEasel();
+    this.buildSpots();
     this.camYaw = -0.6; this.camPitch = 0.42; this.camDist = 10;
     this.camTarget = new THREE.Vector3(0, 2, 0);
     this.world = {
@@ -133,6 +165,7 @@ export class Island {
     const clear = (x, z, pad = 0) => {
       if (Math.hypot(x - SPAWN.x, z - SPAWN.z) < 8 + pad) return false;
       for (const zn of ZONES) if (Math.hypot(x - zn.x, z - zn.z) < 6.5 + pad) return false;
+      for (const sp of SPOTS) if (Math.hypot(x - sp.x, z - sp.z) < 4.5 + pad) return false;
       return pathWeight(x, z) < 0.15;
     };
     // trees, clumped into groves
@@ -147,6 +180,7 @@ export class Island {
       trees.push({ x, y: h - 0.15, z, h: bush ? 2.2 + r() * 1.2 : 6.5 + r() * 4.5, ry: r() * 6.28, kind: bush ? 4 + ((r() * 2) | 0) : (r() * 4) | 0 });
     }
     this.trees = plantTrees(this.scene, trees);
+    this.hideSpots = trees.filter((t) => t.h > 3 || t.kind >= 4);
     // scanned rocks: coastline boulders + cliff rubble
     const rocks = [], rs = Math.max(...['rock1', 'rock2', 'rock3'].map((k) => { const v = modelSize(k); return Math.max(v.x, v.z); }));
     for (let i = 0; i < 2000 && rocks.length < 60; i++) {
@@ -268,6 +302,28 @@ export class Island {
     this.scene.add(g); this.easel = g;
   }
 
+  buildSpots() {
+    const make = { pageant: pageantStage, dance: danceFloor, downhill: startGate, fishing: fishingSpot, hideseek: bellFrame, board: noticeBoard };
+    this.spotState = SPOTS.map((sp) => {
+      const lm = make[sp.id]();
+      const g = lm.group;
+      g.position.set(sp.x, islandH(sp.x, sp.z) - 0.02, sp.z);
+      // face the meadow
+      g.rotation.y = Math.atan2(SPAWN.x - sp.x, SPAWN.z - sp.z);
+      const lbl = label(sp.name, sp.jp); lbl.scale.set(3.9, 0.81, 1); lbl.position.y = lm.signY;
+      lbl.material.transparent = true;
+      g.add(lbl);
+      this.scene.add(g);
+      return { sp, lm, lbl };
+    });
+    this.board = this.spotState.find((s) => s.sp.id === 'board').lm;
+  }
+
+  refreshBoard() {
+    const T = today(this.app.save);
+    this.board.draw({ text: T.ch.text, done: T.done, stamps: this.app.save.stamps || 0 });
+  }
+
   buildLocals() {
     const seeds = [11, 23, 37, 51];
     seeds.forEach((sd, i) => {
@@ -298,6 +354,7 @@ export class Island {
   }
 
   applySave() {
+    this.refreshBoard();
     const won = this.app.save.orbs || [];
     this.zoneState.forEach((zs, i) => { zs.target = won.includes(i) ? 0 : 1; });
     this.syncGloom(true);
@@ -346,11 +403,20 @@ export class Island {
     this.camTarget.set(this.player.x, this.player.y + 1, this.player.z);
     $('controls-hint').classList.remove('hidden');
     clearTimeout(this.hintT); this.hintT = setTimeout(() => $('controls-hint').classList.add('hidden'), 12000);
+    const T = today(this.app.save);
+    if (!T.done && this.app.save.dailySeen !== T.key) {
+      this.app.save.dailySeen = T.key; this.app.persist();
+      setTimeout(() => this.app.toast('A new daily challenge is up on the board!', 3200), 2600);
+    }
   }
 
+  // i: a Gloom zone index, or a side-game spot ({ id, name, jp, side: true, Event })
   startEvent(i) {
-    const zn = ZONES[i];
-    this.app.transition(() => {
+    if (!this.player) return;
+    const zn = typeof i === 'object' ? i : ZONES[i];
+    this.hideSeek?.abort();
+    this.app.transition(async () => {
+      if (!zn.Event && zn.load) zn.Event = await zn.load();
       this.scene.remove(this.player.c.group);
       this.activeEvent = new zn.Event(this.app, this, this.player.c, i);
       this.app.setMode('event');
@@ -358,7 +424,17 @@ export class Island {
     });
   }
 
-  endEvent(won, i) {
+  // best score per side game; returns { best, isNew }
+  noteRecord(id, score, text = String(score)) {
+    const R = this.app.save.records || (this.app.save.records = {});
+    const isNew = R[id] == null || score > R[id].score;
+    if (isNew) { R[id] = { score, text }; this.app.persist(); }
+    return { best: R[id].text, isNew };
+  }
+  record(id) { return this.app.save.records?.[id]?.text; }
+
+  endEvent(won, i, result = {}) {
+    if (typeof i === 'object') return this.endSideGame(won, i, result);
     this.app.transition(() => {
       const ev = this.activeEvent; this.activeEvent = null;
       ev?.dispose?.();
@@ -377,6 +453,7 @@ export class Island {
       this.camYaw = a; this.camTarget.set(this.player.x, this.player.y + 1, this.player.z);
       this.app.setMode('island');
       const save = this.app.save;
+      this.onGameResult(i, { won, ...result }, c);
       if (won && !save.orbs.includes(i)) {
         save.orbs.push(i);
         this.app.persist();
@@ -385,6 +462,69 @@ export class Island {
       }
     });
   }
+
+  endSideGame(won, spot, result) {
+    this.app.transition(() => {
+      const ev = this.activeEvent; this.activeEvent = null;
+      ev?.dispose?.();
+      $('event-hud').classList.add('hidden');
+      $('banner').classList.add('hidden');
+      const c = this.player.c;
+      c.group.scale.set(1, 1, 1); c.tilt.rotation.set(0, 0, 0);
+      c.motion.celebrate = 0;
+      this.scene.add(c.group);
+      const sx = spot.x ?? SPAWN.x, sz = spot.z ?? SPAWN.z, a = Math.atan2(SPAWN.z - sz, SPAWN.x - sx);
+      this.player.x = sx + Math.cos(a) * 3; this.player.z = sz + Math.sin(a) * 3;
+      this.player.y = islandH(this.player.x, this.player.z); this.player.vx = this.player.vz = this.player.vy = 0;
+      this.player.heading = Math.atan2(-Math.sin(a), Math.cos(a));
+      this.player.refresh();
+      this.camYaw = a + Math.PI; this.camTarget.set(this.player.x, this.player.y + 1, this.player.z);
+      this.app.setMode('island');
+      this.onGameResult(spot.id, { won, ...result }, c);
+    });
+  }
+
+  startHideSeek(spot = gameSpot('hideseek')) {
+    if (this.hideSeek) return;
+    const bell = this.spotState.find((s) => s.sp.id === 'hideseek').lm;
+    bell.ring(); sfx.chime();
+    this.app.transition(() => { this.hideSeek = new HideSeek(this, spot); });
+  }
+
+  banner(text, ms = 900) {
+    const b = $('banner'); b.textContent = text; b.classList.remove('hidden');
+    b.style.animation = 'none'; void b.offsetWidth; b.style.animation = '';
+    clearTimeout(this._bt); if (ms) this._bt = setTimeout(() => b.classList.add('hidden'), ms);
+  }
+
+  // any game finished (Gloom event, side game or hide & seek): records the daily challenge
+  onGameResult(game, result, creature) {
+    const save = this.app.save;
+    if (!checkDaily(save, game, result, creature)) return;
+    this.app.persist();
+    this.refreshBoard();
+    // wait for any results card to be closed first, then stamp it
+    const show = () => {
+      if (!$('modal').classList.contains('hidden') || this.app.mode !== 'island') { setTimeout(show, 400); return; }
+      sfx.fanfare();
+      const P = this.player;
+      if (P) for (let k = 0; k < 3; k++) setTimeout(() => this.fx.emit(P.x, P.y + 1.5, P.z, { count: 50, colors: ['#ffe680', '#e63b2e', '#ffffff', '#ffd23f'], speed: 7, up: 8, gravity: 7, size: 0.32, life: 1.8 }), k * 220);
+      this.app.modal(`<h2><span class="jp">達成</span>Daily challenge done!</h2>
+        <div class="stamp-award"><b>${save.stamps}</b><span>STAMP${save.stamps === 1 ? '' : 'S'}</span></div>
+        <p>${save.streak > 1 ? `That's a <b>${save.streak}-day streak</b>! ` : ''}A new challenge goes up on the board tomorrow.</p>
+        <div class="row"><button class="btn primary" id="m-ok">Nice!</button></div>`);
+      $('m-ok').onclick = () => this.app.closeModal();
+    };
+    setTimeout(show, 900);
+  }
+
+  playDaily() {
+    const g = today(this.app.save).ch.game;
+    if (typeof g === 'number') this.startEvent(g);
+    else if (g === 'hideseek') this.startHideSeek();
+    else this.startEvent(gameSpot(g));
+  }
+  gameName(g) { return typeof g === 'number' ? ZONES[g].name : gameSpot(g).name; }
 
   finale() {
     sfx.fanfare();
@@ -404,6 +544,14 @@ export class Island {
     this.water.update(t);
     this.gooU.uTime.value = t; this.portalU.uTime.value = t;
     updateTrees(t);
+    // landmarks animate; their signs fade in as you get close so the island doesn't feel like a menu
+    const ref = this.attract ? null : this.player;
+    for (const st of this.spotState) {
+      st.lm.update?.(t);
+      const d = ref ? Math.hypot(ref.x - st.sp.x, ref.z - st.sp.z) : 0;
+      st.lbl.material.opacity = ref ? smoothstep(30, 18, d) : 0.95;
+      st.lbl.visible = st.lbl.material.opacity > 0.02;
+    }
     for (const zs of this.zoneState) {
       zs.glow.intensity = (1 - zs.strength) * 7;
       if (zs.strength !== zs.target) {
@@ -468,17 +616,20 @@ export class Island {
     this.camera.lookAt(this.camTarget);
     this.lights.follow(this.camTarget);
     this.fx.update(dt);
+    this.hideSeek?.update(dt);
 
     // proximity prompts
     // monsters: only when you're right next to one, and keep it a moment so it doesn't flicker
     let near = null, best = 1.9;
     for (const r of this.garden.roamers) {
+      if (r.hiding) continue;
       const d = Math.hypot(P.x - r.b.x, P.z - r.b.z);
       if (d < best || (r === this.nearRoamer && d < 2.6 && d < best + 0.7)) { best = d; near = { kind: 'roamer', r }; }
     }
     this.nearRoamer = near?.r || null;
     ZONES.forEach((zn, i) => { if (Math.hypot(P.x - zn.x, P.z - zn.z) < 5) near = { kind: 'zone', i }; });
     if (Math.hypot(P.x - this.easel.position.x, P.z - this.easel.position.z) < 3.5) near = { kind: 'easel' };
+    if (!this.hideSeek) for (const { sp } of this.spotState) if (Math.hypot(P.x - sp.x, P.z - sp.z) < 3.4) near = { kind: 'spot', sp };
     this.showPrompt(near);
     if (near && I.interactPressed) this.activate(near);
     if (near?.kind === 'roamer' && near.r.pet && I.pressed.has('f')) this.app.swapTo(near.r);
@@ -486,7 +637,7 @@ export class Island {
 
   showPrompt(near) {
     const el = $('prompt');
-    const key = near ? near.kind + (near.i ?? '') + (near.r ? near.r.c.design.name + near.r.pet : '') : '';
+    const key = near ? near.kind + (near.i ?? '') + (near.sp?.id ?? '') + (near.r ? near.r.c.design.name + near.r.pet : '') : '';
     if (key === this.promptKey) return;
     this.promptKey = key;
     if (!near) { el.classList.add('hidden'); return; }
@@ -498,23 +649,45 @@ export class Island {
       // a slim pill, not a card: you walk past these all the time
       const r = near.r;
       el.innerHTML = `<b>${escapeHtml(r.name)}</b><button id="p-go">♥ Pet <kbd>E</kbd></button>${r.pet ? '<button id="p-swap">⇄ Play as <kbd>F</kbd></button>' : ''}`;
+    } else if (near.kind === 'spot' && near.sp.kind === 'board') {
+      const T = today(this.app.save), ok = !T.ch.needs || T.ch.needs(this.player.c), save = this.app.save;
+      el.innerHTML = `<h2><span class="jp">今日</span>Daily Challenge${T.done ? '<em>DONE</em>' : ''}</h2>
+        <p>${T.ch.text}</p>
+        ${!T.done && !ok ? `<p class="warn">${escapeHtml(this.player.c.design.name)} doesn't qualify yet. ${T.ch.need}</p>` : ''}
+        <p class="stamps">Stamps ×${save.stamps || 0}${save.streak > 1 && save.lastDaily ? ` · ${save.streak}-day streak` : ''}${T.done ? ' · new one tomorrow' : ''}</p>
+        <div class="row">${!T.done && !ok
+          ? `<button class="btn primary" id="p-edit">Edit ${escapeHtml(this.player.c.design.name)} <kbd>E</kbd></button><button class="btn" id="p-go">Play anyway</button>`
+          : `<button class="btn primary" id="p-go">Go: ${this.gameName(T.ch.game)} <kbd>E</kbd></button>`}</div>`;
+    } else if (near.kind === 'spot') {
+      const sp = near.sp, rec = this.record(sp.id);
+      el.innerHTML = `<h2><span class="jp">${sp.jp}</span>${sp.name}${rec ? `<em>BEST ${escapeHtml(rec)}</em>` : ''}</h2><p>${sp.desc}</p><div class="row"><button class="btn primary" id="p-go">Play <kbd>E</kbd></button></div>`;
     } else {
       const zn = ZONES[near.i], done = this.app.save.orbs.includes(near.i);
       el.innerHTML = `<h2><span class="jp">${zn.jp}</span>${zn.name}${done ? '<em>CLEARED</em>' : ''}</h2><p>${zn.desc}</p><div class="row"><button class="btn primary" id="p-go">${done ? 'Play again' : 'Play'} <kbd>E</kbd></button></div>`;
     }
     el.classList.toggle('mini', near.kind === 'roamer');
     el.classList.remove('hidden');
-    $('p-go').onclick = () => this.activate(near);
+    $('p-go').onclick = () => this.activate(near, true);
+    if ($('p-edit')) $('p-edit').onclick = () => this.activate(near);
     if ($('p-new')) $('p-new').onclick = () => { this.promptKey = null; el.classList.add('hidden'); this.app.newMonster(); };
     if ($('p-swap')) $('p-swap').onclick = () => this.app.swapTo(near.r);
     if (near.kind !== 'roamer') sfx.pop(1.4);
   }
 
-  activate(near) {
+  // play: the Play button was clicked (vs the E key / primary action)
+  activate(near, play = false) {
     if (near.kind === 'roamer') { this.garden.pet(near.r); this.promptKey = null; return; }
     this.promptKey = null; $('prompt').classList.add('hidden');
-    if (near.kind === 'easel') this.app.editMonster();
-    else this.startEvent(near.i);
+    if (near.kind === 'easel') { this.hideSeek?.abort(); this.app.editMonster(); }
+    else if (near.kind === 'spot') {
+      const sp = near.sp;
+      if (sp.kind === 'board') {
+        const T = today(this.app.save), ok = !T.ch.needs || T.ch.needs(this.player.c);
+        if (!play && !T.done && !ok) this.app.editMonster(); else this.playDaily();
+      }
+      else if (sp.kind === 'hideseek') this.startHideSeek(sp);
+      else this.startEvent(sp);
+    } else this.startEvent(near.i);
   }
 
   resize() {
