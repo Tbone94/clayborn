@@ -309,7 +309,11 @@ export class Cinema extends Director {
         D.cue('braam', this.t0);
         worldLook({ bloom: 0.25 }); aspect(isl.camera);
         D.heroIntoIsland(SP.x + Math.cos(-0.9) * 7.5, SP.z + Math.sin(-0.9) * 7.5, 0.6);
+        // the island's wandering locals are random per load; keep them out of the hero shot
+        this.locals = isl.garden.roamers.filter((r) => !r.pet);
+        for (const r of this.locals) r.c.group.visible = false;
       },
+      exit() { for (const r of this.locals) r.c.group.visible = true; },
       update(dt, lt) {
         D.islandTick(dt);
         const b = D.heroBody;

@@ -2,6 +2,8 @@
 
 **Draw a monster. It inflates into living clay. Its shape decides what it's good at.**
 
+▶ **Play it in your browser: https://tbone94.github.io/clayborn/**
+
 A modern take on Sega's *Amazing Island* (GameCube, 2004). That game's creature editor was brilliant, but the minigames around it were a grind. Clayborn keeps the editor and rebuilds the rest so the shape you draw *is* the gameplay.
 
 ## Run it
