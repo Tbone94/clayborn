@@ -6,6 +6,7 @@ import { FRAMES, LAYERS, LAYER_COLORS, GHOSTS, OPTIONAL } from '../creature/fram
 import { PAINT, paintShape, bump, w2p, encodeDesign, decodeDesign, newDesign } from '../creature/design.js';
 import { randomDesign, randomName } from '../creature/generator.js';
 import { STAT_INFO } from '../creature/stats.js';
+import { curse } from '../creature/mutate.js';
 import { PATTERNS, FINISHES } from '../fx/clay.js';
 import { sfx, babble } from '../fx/audio.js';
 
@@ -103,8 +104,10 @@ export class Creator {
 
     $('name').oninput = (e) => { this.design.name = e.target.value || '???'; this.refreshSpecNo(); };
     $('btn-rename').onclick = () => { this.design.name = randomName(Math.random); $('name').value = this.design.name; this.refreshSpecNo(); sfx.pop(); babble(1.2, 3); };
-    $('btn-random').onclick = () => { sfx.sparkle(); this.load(randomDesign((Math.random() * 1e9) | 0)); this.goStep(LAYERS.length); this.setPhase('shape'); };
+    $('btn-random').onclick = () => { sfx.sparkle(); this.showPicker(false); this.load(randomDesign((Math.random() * 1e9) | 0)); this.goStep(LAYERS.length); this.setPhase('shape'); };
     $('btn-share').onclick = () => this.shareModal();
+    $('btn-curse').onclick = () => this.doCurse();
+    $('btn-card').onclick = () => { sfx.click(); this.app.cardModal(this.creature); };
     $('btn-blank').onclick = () => { sfx.squish(0.7); this.load(this.blankLike(this.design)); this.setPhase('shape'); this.showPicker(true); };
     $('btn-guide').onclick = () => {
       this.pushUndo([this.active]);
@@ -579,18 +582,37 @@ export class Creator {
   }
 
   // undo entries can cover several parts (clear-all)
-  snapshot(ids) { return ids.map((id) => ({ id, img: this.design.layers[id].getContext('2d', { willReadFrequently: true }).getImageData(0, 0, PAINT, PAINT) })); }
-  pushUndo(ids) {
-    this.undo.push(this.snapshot(ids));
+  // look = also remember colors/eyes/puffiness (curses change those too)
+  snapshot(ids, look = false) {
+    const d = this.design;
+    const snap = ids.map((id) => ({ id, img: d.layers[id].getContext('2d', { willReadFrequently: true }).getImageData(0, 0, PAINT, PAINT) }));
+    if (look) snap.push({ look: { color: d.color, color2: d.color2, pattern: d.pattern, eyes: d.eyes, eyeSize: d.eyeSize, thick: { ...d.thick } } });
+    return snap;
+  }
+  pushUndo(ids, look = false) {
+    this.undo.push(this.snapshot(ids, look));
     if (this.undo.length > 40) this.undo.shift();
   }
   restore(stackFrom, stackTo) {
     const u = stackFrom.pop(); if (!u) return;
-    stackTo.push(this.snapshot(u.map((e) => e.id)));
-    for (const e of u) { this.design.layers[e.id].getContext('2d').putImageData(e.img, 0, 0); bump(this.design, e.id); }
-    if (u.length === 1 && u[0].id !== this.active) this.setActive(u[0].id, true);
+    const ids = u.filter((e) => e.id).map((e) => e.id), look = u.find((e) => e.look)?.look;
+    stackTo.push(this.snapshot(ids, !!look));
+    for (const e of u) if (e.id) { this.design.layers[e.id].getContext('2d').putImageData(e.img, 0, 0); bump(this.design, e.id); }
+    if (look) { Object.assign(this.design, look, { thick: { ...look.thick } }); this.lookChanged(true); }
+    if (ids.length === 1 && ids[0] !== this.active) this.setActive(ids[0], true);
     sfx.squish(1.3);
     this.changed();
+  }
+
+  // one-click mutation: warps the drawing, so it stays editable and Undo takes it back
+  doCurse() {
+    if (this.isBlank()) { this.app.toast('Draw something to curse first!'); sfx.bonk(); return; }
+    this.pushUndo(LAYERS, true); this.redo = [];
+    const names = curse(this.design);
+    this.lookChanged(true);
+    this.changed();
+    sfx.squish(0.5); setTimeout(() => sfx.boing(0.7), 120); babble(0.8, 4, 0);
+    this.app.toast(`呪 CURSED: ${names.join(' + ')}`, 2600);
   }
   doUndo() { this.restore(this.undo, this.redo); }
   doRedo() { this.restore(this.redo, this.undo); }

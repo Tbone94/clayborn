@@ -9,6 +9,7 @@ import { decodeDesign, encodeDesign, newDesign, cloneDesign } from './creature/d
 import { randomName } from './creature/generator.js';
 import { initAudio, playMusic, sfx, setMuted, isMuted, babble, setAmbience } from './fx/audio.js';
 import { Input } from './ui/input.js';
+import { drawCard } from './ui/card.js';
 import { loadAssets } from './world/assets.js';
 import { WORLD_TIME, cullNature } from './world/nature.js';
 
@@ -85,6 +86,7 @@ class App {
     $('btn-code').onclick = () => { sfx.click(); this.codeModal(); };
     $('btn-edit').onclick = () => { sfx.click(); this.editMonster(); };
     $('btn-credits').onclick = () => { sfx.click(); this.creditsModal(); };
+    $('btn-hud-card').onclick = () => { sfx.click(); if (this.player) this.cardModal(this.player); };
     this.bindInstall();
     $('btn-mute').onclick = () => { setMuted(!isMuted()); $('btn-mute').textContent = isMuted() ? 'SND OFF' : 'SND ON'; };
 
@@ -267,6 +269,28 @@ class App {
       $('quiz-opts').appendChild(b);
     });
     $('quiz-dots').innerHTML = QUIZ.map((_, k) => `<i class="${k <= i ? 'on' : ''}"></i>`).join('');
+  }
+
+  // trading card of a monster: photo on the turntable + stats + curse level, saveable as a PNG
+  async cardModal(creature) {
+    if (!creature?.mesh) { this.toast('Draw a body first!'); sfx.bonk(); return; }
+    const photo = this.studio.photo(creature);
+    this.frame(); // put the real frame straight back on screen
+    const card = await drawCard(creature.design, creature.stats, photo);
+    const url = card.toDataURL('image/png'), nm = creature.design.name || 'monster';
+    sfx.sparkle();
+    this.modal(`<h2><span class="jp">図鑑</span>${escapeHtml(nm)}'s card</h2>
+      <img class="monster-card" src="${url}" alt="${escapeHtml(nm)} trading card" />
+      <div class="row">
+        <a class="btn primary" id="m-save" download="${escapeHtml(nm.replace(/[^\w-]+/g, '_'))}-clayborn-card.png" href="${url}">Save image</a>
+        <button class="btn" id="m-copy">Copy</button>
+        <button class="btn ghost" id="m-x">Close</button>
+      </div>`);
+    $('m-copy').onclick = async () => {
+      try { const blob = await new Promise((r) => card.toBlob(r, 'image/png')); await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]); this.toast('Card copied! Paste it to a friend.'); sfx.chime(); }
+      catch { this.toast('Your browser won\'t copy images. Use Save instead.'); }
+    };
+    $('m-x').onclick = () => this.closeModal();
   }
 
   codeModal() {

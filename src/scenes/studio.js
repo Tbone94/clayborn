@@ -104,6 +104,32 @@ export class Studio {
     return true;
   }
 
+  // a square portrait of any creature on the turntable (borrowed from wherever it lives)
+  photo(c, size = 800) {
+    const r = this.app.gfx.renderer, g = c.group;
+    const parent = g.parent, pos = g.position.clone(), rot = g.rotation.clone(), scl = g.scale.clone();
+    const spin = this.holder.rotation.y, pspin = this.pedestal.rotation.y, tilt = c.tilt.rotation.clone();
+    this.holder.add(g); g.position.set(0, 0, 0); g.rotation.set(0, 0, 0); g.scale.set(1, 1, 1); c.tilt.rotation.set(0, 0, 0);
+    this.holder.rotation.y = this.pedestal.rotation.y = -0.5; // a flattering three-quarter view
+    this.holder.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(g), ctr = box.getCenter(new THREE.Vector3());
+    const rad = Math.max(0.6, box.getSize(new THREE.Vector3()).length() / 2);
+    const cv = r.domElement, aspect = cv.width / cv.height;
+    const cam = new THREE.PerspectiveCamera(30, aspect, 0.1, 60);
+    const fov = aspect >= 1 ? 30 : 2 * Math.atan(Math.tan((15 * Math.PI) / 180) * aspect) * 180 / Math.PI;
+    const dist = (rad / Math.sin((fov * Math.PI) / 360)) * 0.95;
+    cam.position.set(ctr.x, ctr.y + dist * 0.28, ctr.z + dist); cam.lookAt(ctr.x, ctr.y - rad * 0.08, ctr.z);
+    r.setRenderTarget(null); r.render(this.scene, cam);
+    const out = document.createElement('canvas'); out.width = out.height = size;
+    const side = Math.min(cv.width, cv.height);
+    out.getContext('2d').drawImage(cv, (cv.width - side) / 2, (cv.height - side) / 2, side, side, 0, 0, size, size);
+    // put everything back where it was
+    if (parent && parent !== this.holder) parent.add(g); else if (!parent) this.holder.remove(g);
+    g.position.copy(pos); g.rotation.copy(rot); g.scale.copy(scl); c.tilt.rotation.copy(tilt);
+    this.holder.rotation.y = spin; this.pedestal.rotation.y = pspin;
+    return out;
+  }
+
   update(dt, t) {
     const c = this.creature;
     if (!this.dragging) { this.spinVel *= Math.pow(0.05, dt); this.spin += this.spinVel + (this.autoSpin === false ? 0 : dt * 0.25); }
